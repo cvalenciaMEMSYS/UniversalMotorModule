@@ -302,7 +302,8 @@ Note:   Performs software reset via esp_restart()
 | **e** | Toggle Enable | `Driver ENABLED` or `Driver DISABLED` |
 | **r** | Reset | `Resetting driver...` → `Driver reset complete` |
 | **s** | StallGuard | StallGuard data with SG result and threshold |
-| **d** | Diagnostics | Complete driver status report |
+| **d** | Diagnostics | Complete driver status report (LIVE from UART) |
+| **t** | Test Connection | UART connection test with multiple checks |
 | **h** | Help | Full command menu |
 | **x** | Restart ESP32 | `Restarting ESP32...` → Device reboots |
 
