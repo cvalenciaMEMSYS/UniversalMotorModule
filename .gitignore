@@ -1,0 +1,113 @@
+# ============================================
+# PlatformIO
+# ============================================
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch/
+.vscode/settings.json
+
+# ============================================
+# Build outputs
+# ============================================
+*.o
+*.a
+*.elf
+*.bin
+*.hex
+*.map
+
+# ============================================
+# VSCode
+# ============================================
+.vscode/*
+!.vscode/extensions.json
+.history/
+
+# ============================================
+# OS Files
+# ============================================
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ============================================
+# Python (if using scripts)
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# ============================================
+# IDE Files
+# ============================================
+# Eclipse
+.cproject
+.project
+.settings/
+
+# JetBrains (CLion, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+cmake-build-*/
+
+# ============================================
+# Logs and Databases
+# ============================================
+*.log
+*.sql
+*.sqlite
+*.db
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ============================================
+# Backup Files
+# ============================================
+*.bak
+*.backup
+*.orig
+
+# ============================================
+# Documentation Build
+# ============================================
+docs/_build/
+site/
+
+# ============================================
+# Custom Project Files
+# ============================================
+# Add your custom ignores here
+# credentials.h
+# secrets.h
