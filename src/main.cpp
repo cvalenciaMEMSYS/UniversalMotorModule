@@ -15,14 +15,26 @@
  *   ESP32-S3 GPIO 5  →  TMC2209 STEP (Step pulses)
  *   ESP32-S3 GPIO 6  →  TMC2209 DIR  (Direction)
  * 
- * UART Pins (Option 1 - Recommended):
+ * UART Pins (Option 1 - TESTED & WORKING ✅):
+ *   ───────────────────────────────────────────
  *   ESP32-S3 GPIO 1 ─┬─ 1kΩ resistor ─→ TMC2209 RX pin
  *   ESP32-S3 GPIO 2 ─┘
  *   (TMC2209 TX pin left unconnected)
+ *   
+ *   This is the CONFIRMED WORKING method after testing.
+ *   Requirements:
+ *   - 1× 1kΩ resistor (1/4W or 1/8W)
+ *   - Wire connecting GPIO 1 and GPIO 2 together
+ *   - Wire from junction → resistor → TMC2209 RX
+ *   - TMC2209 TX pin left floating
  * 
- * UART Pins (Option 2 - Direct):
+ * UART Pins (Option 2 - NOT TESTED):
+ *   ──────────────────────────────────
  *   ESP32-S3 GPIO 1  →  TMC2209 TX pin
  *   ESP32-S3 GPIO 2  →  TMC2209 RX pin
+ *   
+ *   This dual-wire method did NOT work in initial testing.
+ *   Use Option 1 (resistor method) instead.
  * 
  * Power Pins:
  *   ESP32-S3 3.3V    →  TMC2209 VIO (Logic power)

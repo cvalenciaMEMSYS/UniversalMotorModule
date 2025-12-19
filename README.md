@@ -38,19 +38,30 @@ GND        →      GND (Common ground)
 12-28V     →      VS (Motor power)
 ```
 
-**UART Connection (Choose ONE):**
+**UART Connection (Single-Wire Half-Duplex):**
 
-**Option 1 - Simple (Recommended):**
+**✅ WORKING METHOD (Resistor - TESTED):**
 ```
-GPIO 1 & 2 ──┬── 1kΩ resistor ──┬── TMC2209 RX pin
-              └──────────────────┘
+GPIO 1 ──┬─────────────┐
+GPIO 2 ──┘             │
+                    1kΩ resistor
+                       │
+                       ├──→ TMC2209 RX pin
+                       
+(TMC2209 TX pin left unconnected)
 ```
 
-**Option 2 - Direct:**
+**Wiring Steps:**
+1. Connect GPIO 1 and GPIO 2 together with a wire
+2. From junction, connect through 1kΩ resistor to TMC2209 RX pin
+3. Leave TMC2209 TX pin floating (not connected)
+
+**❌ Option 2 - Dual Wire (NOT WORKING):**
 ```
 GPIO 1  ──────────  TMC2209 TX pin
 GPIO 2  ──────────  TMC2209 RX pin
 ```
+This method failed in testing. Stick with the resistor method above.
 
 📖 **Detailed wiring:** See [Quick_Wiring_Guide_Custom_Pins.md](Quick_Wiring_Guide_Custom_Pins.md)
 

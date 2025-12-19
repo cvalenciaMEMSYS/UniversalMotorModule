@@ -23,7 +23,7 @@ GND        →      GND (right)       Common ground
 
 ## 🔌 UART WIRING - TWO OPTIONS
 
-### OPTION 1: Single Wire (Recommended - Simpler)
+### ✅ OPTION 1: Single Wire (TESTED & WORKING)
 
 ```
      ESP32-S3                           TMC2209 v1.3
@@ -40,9 +40,11 @@ GND        →      GND (right)       Common ground
 - 1× wire from resistor to TMC2209 RX pin
 - 2× wires from GPIO 1 and 2 to resistor
 
+**⚠️ IMPORTANT:** This method was confirmed working after testing. The dual-wire method (Option 2) did NOT work.
+
 ---
 
-### OPTION 2: Dual Wire (Uses Onboard Resistors)
+### ❌ OPTION 2: Dual Wire (NOT WORKING - DO NOT USE)
 
 ```
      ESP32-S3                           TMC2209 v1.3
@@ -55,6 +57,8 @@ GND        →      GND (right)       Common ground
 **What you need:**
 - 2× wires
 - NO external resistor needed
+
+**⚠️ NOTE:** This method was tested and did NOT work. Use Option 1 instead.
 
 ---
 
@@ -71,15 +75,15 @@ GND        →      GND (right)       Common ground
 - [ ] **STEP (TMC left)** ← ESP32 GPIO 5
 - [ ] **DIR (TMC left)** ← ESP32 GPIO 6
 
-### UART Connection (Choose ONE option):
-**Option 1:**
-- [ ] ESP32 GPIO 1 & 2 connected through 1kΩ resistor
-- [ ] Junction connects to TMC2209 RX pin only
+### UART Connection (Use Option 1 ONLY):
+**✅ Option 1 (WORKING):**
+- [ ] ESP32 GPIO 1 & 2 connected together
+- [ ] Junction connects through 1kΩ resistor to TMC2209 RX pin
 - [ ] TMC2209 TX pin left unconnected
 
-**Option 2:**
-- [ ] ESP32 GPIO 1 → TMC2209 TX pin
-- [ ] ESP32 GPIO 2 → TMC2209 RX pin
+**❌ Option 2 (NOT WORKING - DO NOT USE):**
+- ~~ESP32 GPIO 1 → TMC2209 TX pin~~
+- ~~ESP32 GPIO 2 → TMC2209 RX pin~~
 
 ### Motor Connections:
 - [ ] **A1 & A2 (TMC right)** ← Motor Coil A
