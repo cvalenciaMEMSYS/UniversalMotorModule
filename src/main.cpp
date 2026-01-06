@@ -1,10 +1,10 @@
 /*
  * =============================================================================
- * TMC2209 Stepper Motor Control for ESP32-S3 Super Mini
+ * Universal Motor Module - TMC2209 & DC Motor Control for ESP32-S3 Super Mini
  * =============================================================================
  * 
- * Full-featured stepper motor control using TMC2209 driver with UART interface.
- * Supports StealthChop (quiet), SpreadCycle (torque), StallGuard, and CoolStep.
+ * Full-featured motor control supporting TMC2209 stepper drivers and RZ7899-MS
+ * H-bridge DC motors. Stepper features: StealthChop, SpreadCycle, StallGuard, CoolStep.
  * 
  * =============================================================================
  * WIRING GUIDE - ESP32-S3 Super Mini to TMC2209 v1.3
@@ -17,15 +17,16 @@
  * 
  * UART Pins (Option 1 - TESTED & WORKING ✅):
  *   ───────────────────────────────────────────
- *   ESP32-S3 GPIO 1 ─┬─ 1kΩ resistor ─→ TMC2209 RX pin
- *   ESP32-S3 GPIO 2 ─┘
- *   (TMC2209 TX pin left unconnected)
+ *   ESP32-S3 GPIO 1 (TX_PIN) ──[1kΩ]── ESP32-S3 GPIO 2 (RX_PIN)
+ *            │
+ *            └──────────────────────→ TMC2209 PDN_UART/RX pin
+ *
+ *   TMC2209 TX pin = NOT CONNECTED
  *   
  *   This is the CONFIRMED WORKING method after testing.
  *   Requirements:
- *   - 1× 1kΩ resistor (1/4W or 1/8W)
- *   - Wire connecting GPIO 1 and GPIO 2 together
- *   - Wire from junction → resistor → TMC2209 RX
+ *   - 1× 1kΩ resistor (1/4W or 1/8W) between GPIO 1 and GPIO 2
+ *   - Wire from GPIO 1 directly to TMC2209 PDN_UART/RX pin
  *   - TMC2209 TX pin left floating
  * 
  * UART Pins (Option 2 - NOT TESTED):
@@ -89,6 +90,10 @@
 #define TX_PIN          1        // UART transmit to TMC2209
 #define SERIAL_PORT     Serial1  // Hardware UART peripheral
 
+// DC Motor H-Bridge (RZ7899-MS) pins
+#define DC_FI_PIN       8        // Forward Input (H-bridge)
+#define DC_BI_PIN       9        // Backward Input (H-bridge)
+
 // =============================================================================
 // DRIVER CONFIGURATION
 // =============================================================================
@@ -119,6 +124,12 @@ bool enableState = true;              // true = enabled (EN LOW)
 bool stealthChopEnabled = true;       // true = StealthChop, false = SpreadCycle
 bool uartPinsSwapped = false;         // For debugging TX/RX wiring
 
+// DC Motor state
+bool dcMotorEnabled = false;           // DC motor system enabled
+int dcMotorSpeed = 128;                // PWM duty cycle (0-255)
+bool dcMotorRunning = false;           // Currently running
+bool dcMotorForward = true;            // Direction: true=forward, false=backward
+
 // =============================================================================
 // FUNCTION DECLARATIONS
 // =============================================================================
@@ -136,6 +147,11 @@ void resetDriver();
 void testConnection();
 void swapUartPins();
 void printMenu();
+void dcMotorSetup();
+void dcMotorControl(bool forward, int speed);
+void dcMotorStop();
+void dcMotorStatus();
+void changeDCMotorSpeed();
 
 // =============================================================================
 // SETUP - One-time initialization
@@ -151,7 +167,7 @@ void setup() {
     
     Serial.println();
     Serial.println("==============================================");
-    Serial.println("   TMC2209 Stepper Driver Control");
+    Serial.println("   Universal Motor Module");
     Serial.println("   ESP32-S3 Super Mini Edition");
     Serial.println("==============================================");
     
@@ -173,6 +189,17 @@ void setup() {
     // Enable driver (active LOW)
     digitalWrite(ENABLE_PIN, LOW);
     enableState = true;
+    
+    // Initialize DC Motor H-Bridge pins
+    pinMode(DC_FI_PIN, OUTPUT);
+    pinMode(DC_BI_PIN, OUTPUT);
+    // Attach PWM to pins (ESP32-S3 LEDC)
+    ledcAttach(DC_FI_PIN, 20000, 8);  // 20kHz PWM, 8-bit resolution
+    ledcAttach(DC_BI_PIN, 20000, 8);
+    // Ensure motor is stopped
+    ledcWrite(DC_FI_PIN, 0);
+    ledcWrite(DC_BI_PIN, 0);
+    Serial.println("✓ DC Motor H-Bridge initialized (GPIO 8, 9)");
     
     // Initial pin states
     digitalWrite(STEP_PIN, LOW);
@@ -386,6 +413,32 @@ void handleCommand(char cmd) {
             esp_restart();
             break;
             
+        // DC Motor commands
+        case 'f':
+        case 'F':
+            Serial.print("DC Motor FORWARD at speed ");
+            Serial.println(dcMotorSpeed);
+            dcMotorControl(true, dcMotorSpeed);
+            break;
+            
+        case 'b':
+        case 'B':
+            Serial.print("DC Motor BACKWARD at speed ");
+            Serial.println(dcMotorSpeed);
+            dcMotorControl(false, dcMotorSpeed);
+            break;
+            
+        case 'o':
+        case 'O':
+            Serial.println("DC Motor STOPPED (coast)");
+            dcMotorStop();
+            break;
+            
+        case 'p':
+        case 'P':
+            changeDCMotorSpeed();
+            break;
+
         // Ignore newlines and carriage returns
         case '\n':
         case '\r':
@@ -845,9 +898,106 @@ void printMenu() {
     Serial.println("  w - Swap UART TX/RX pins (debug)");
     Serial.println("  h - Show this menu");
     Serial.println();
+    Serial.println("DC Motor Control:");
+    Serial.println("  f - DC motor forward");
+    Serial.println("  b - DC motor backward");
+    Serial.println("  o - Stop DC motor (coast)");
+    Serial.println("  p - Set DC motor speed (0-255)");
+    Serial.println();
     Serial.println("System:");
     Serial.println("  x - Restart ESP32");
     Serial.println();
     Serial.println("========================================");
     Serial.println();
+}
+
+// =============================================================================
+// DC MOTOR CONTROL FUNCTIONS (RZ7899-MS H-Bridge)
+// =============================================================================
+
+/**
+ * Control DC motor direction and speed
+ * @param forward true = forward, false = backward
+ * @param speed PWM duty cycle (0-255)
+ */
+void dcMotorControl(bool forward, int speed) {
+    // Clamp speed to valid range
+    if (speed < 0) speed = 0;
+    if (speed > 255) speed = 255;
+    
+    dcMotorRunning = true;
+    dcMotorForward = forward;
+    dcMotorSpeed = speed;
+    
+    if (forward) {
+        ledcWrite(DC_BI_PIN, 0);       // Ensure backward is off
+        ledcWrite(DC_FI_PIN, speed);   // Forward at speed
+    } else {
+        ledcWrite(DC_FI_PIN, 0);       // Ensure forward is off
+        ledcWrite(DC_BI_PIN, speed);   // Backward at speed
+    }
+}
+
+/**
+ * Stop DC motor (coast mode - both pins LOW)
+ */
+void dcMotorStop() {
+    dcMotorRunning = false;
+    ledcWrite(DC_FI_PIN, 0);
+    ledcWrite(DC_BI_PIN, 0);
+}
+
+/**
+ * Display DC motor status
+ */
+void dcMotorStatus() {
+    Serial.println();
+    Serial.println("=== DC Motor Status ===");
+    Serial.print("Running: ");
+    Serial.println(dcMotorRunning ? "Yes" : "No");
+    Serial.print("Direction: ");
+    Serial.println(dcMotorForward ? "Forward" : "Backward");
+    Serial.print("Speed: ");
+    Serial.print(dcMotorSpeed);
+    Serial.println(" / 255");
+    Serial.print("Speed %: ");
+    Serial.print((dcMotorSpeed * 100) / 255);
+    Serial.println("%");
+    Serial.println();
+}
+
+/**
+ * Interactive DC motor speed configuration
+ */
+void changeDCMotorSpeed() {
+    Serial.println();
+    Serial.print("Enter DC motor speed (0-255): ");
+    
+    // Wait for input
+    while (!Serial.available()) {
+        delay(10);
+    }
+    
+    int speed = Serial.parseInt();
+    
+    // Clear any remaining characters
+    while (Serial.available()) {
+        Serial.read();
+    }
+    
+    if (speed >= 0 && speed <= 255) {
+        dcMotorSpeed = speed;
+        Serial.println();
+        Serial.print("DC Motor speed set to: ");
+        Serial.println(dcMotorSpeed);
+        
+        // If motor is running, update speed immediately
+        if (dcMotorRunning) {
+            dcMotorControl(dcMotorForward, dcMotorSpeed);
+            Serial.println("(Speed updated on running motor)");
+        }
+    } else {
+        Serial.println();
+        Serial.println("Invalid speed. Must be 0-255");
+    }
 }

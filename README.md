@@ -1,6 +1,6 @@
-# Universal Stepper Module - TMC2209 ESP32 Control
+# Universal Motor Module - TMC2209 & DC Motor Control
 
-Full-featured stepper motor control system using the TMC2209 driver and ESP32-S3 Super Mini, built with PlatformIO.
+Full-featured motor control system supporting TMC2209 stepper drivers and RZ7899-MS H-bridge DC motor controllers, built with PlatformIO for ESP32-S3 Super Mini.
 
 ## 🎯 Quick Start
 
@@ -12,6 +12,8 @@ Full-featured stepper motor control system using the TMC2209 driver and ESP32-S3
 - **Jumper wires**
 - **1× 1kΩ resistor** (for UART Option 1) or just wires (for Option 2)
 - **100µF capacitor** (recommended for VS power filtering)
+- **MSKSEMI RZ7899-MS H-Bridge** (for DC motor control) - OR similar H-bridge
+- **DC brushed motor** (optional, for DC motor mode)
 
 ---
 
@@ -42,18 +44,16 @@ GND        →      GND (Common ground)
 
 **✅ WORKING METHOD (Resistor - TESTED):**
 ```
-GPIO 1 ──┬─────────────┐
-GPIO 2 ──┘             │
-                    1kΩ resistor
-                       │
-                       ├──→ TMC2209 RX pin
-                       
-(TMC2209 TX pin left unconnected)
+GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
+      │
+      └──────────────────→ TMC2209 PDN_UART/RX pin
+
+TMC2209 TX pin = NOT CONNECTED
 ```
 
 **Wiring Steps:**
-1. Connect GPIO 1 and GPIO 2 together with a wire
-2. From junction, connect through 1kΩ resistor to TMC2209 RX pin
+1. Connect 1kΩ resistor between GPIO 1 and GPIO 2
+2. From GPIO 1 (not GPIO 2), connect directly to TMC2209 PDN_UART/RX pin
 3. Leave TMC2209 TX pin floating (not connected)
 
 **❌ Option 2 - Dual Wire (NOT WORKING):**
@@ -65,6 +65,21 @@ This method failed in testing. Stick with the resistor method above.
 
 📖 **Detailed wiring:** See [Quick_Wiring_Guide_Custom_Pins.md](Quick_Wiring_Guide_Custom_Pins.md)
 
+**DC Motor H-Bridge (RZ7899-MS):**
+```
+ESP32-S3          RZ7899-MS
+--------          ---------
+GPIO 8     →      FI (Pin 2 - Forward Input)
+GPIO 9     →      BI (Pin 1 - Backward Input)
+GND        →      GND (Pin 3) - common ground
+
+Motor Power (3-25V) →  VCC (Pin 4) - NOT 3.3V!
+
+Motor Wire 1  →   FO (Pins 5+6 tied together)
+Motor Wire 2  →   BO (Pins 7+8 tied together)
+```
+**Note:** VCC is motor power (3-25V), NOT logic power from ESP32!
+
 ### 3. Build & Upload
 ```bash
 pio run --target upload
@@ -74,8 +89,12 @@ pio device monitor
 ### 4. Test It!
 Open Serial Monitor (115200 baud), you should see:
 ```
-=== TMC2209 Stepper Driver Control ===
+==============================================
+   Universal Motor Module
+   ESP32-S3 Super Mini Edition
+==============================================
 ✓ UART initialized successfully
+✓ DC Motor H-Bridge initialized (GPIO 8, 9)
 ✓ TMC2209 Connection Successful!
 ```
 
@@ -94,6 +113,8 @@ Press **'h'** for the interactive menu, then:
 - ✅ **Bidirectional rotation** - Clockwise and counter-clockwise
 - ✅ **Speed control** - Adjustable on-the-fly
 - ✅ **Continuous or stepped** motion modes
+- ✅ **DC Motor Control** - Forward/backward with PWM speed
+- ✅ **Coast Stop** - Gentle motor stopping
 
 ### Advanced TMC2209 Features
 - ✅ **StealthChop™** - Ultra-quiet operation
@@ -317,6 +338,47 @@ Note:   Performs software reset via esp_restart()
 | **t** | Test Connection | UART connection test with multiple checks |
 | **h** | Help | Full command menu |
 | **x** | Restart ESP32 | `Restarting ESP32...` → Device reboots |
+| **f** | DC Forward | `DC Motor FORWARD at speed XXX` |
+| **b** | DC Backward | `DC Motor BACKWARD at speed XXX` |
+| **o** | DC Stop | `DC Motor STOPPED (coast)` |
+| **p** | DC Speed | Prompt → `DC Motor speed set to: XXX` |
+
+---
+
+## 🎮 DC Motor Commands
+
+| Key | Function | Description |
+|-----|----------|-------------|
+| **f** | Forward | DC motor forward at current speed |
+| **b** | Backward | DC motor backward at current speed |
+| **o** | Stop | Stop DC motor (coast mode) |
+| **p** | Speed | Set DC motor PWM speed (0-255) |
+
+**Command 'f' - DC Motor Forward**
+```
+Input:  f
+Output: DC Motor FORWARD at speed 128
+```
+
+**Command 'b' - DC Motor Backward**
+```
+Input:  b  
+Output: DC Motor BACKWARD at speed 128
+```
+
+**Command 'p' - Set Speed**
+```
+Input:  p
+Output: Enter DC motor speed (0-255):
+Input:  200
+Output: DC Motor speed set to: 200
+```
+
+**Command 'o' - Stop Motor**
+```
+Input:  o
+Output: DC Motor STOPPED (coast)
+```
 
 ---
 
@@ -334,6 +396,10 @@ Note:   Performs software reset via esp_restart()
 #define MICROSTEPS      16       // 16x microstepping
 #define RMS_CURRENT     800      // 800mA motor current
 #define R_SENSE         0.11f    // TMC2209 v1.3 value
+
+// DC Motor H-Bridge (RZ7899-MS)
+#define DC_FI_PIN       8        // Forward Input
+#define DC_BI_PIN       9        // Backward Input
 ```
 
 ### Customizing for Your Motor
@@ -360,7 +426,8 @@ Note:   Performs software reset via esp_restart()
 - **[Code Deep Dive](docs/code-architecture.md)** - How the code works
 - **[ESP32-S3 Capabilities](docs/esp32-s3-guide.md)** - MCU features and specifications
 - **[ESP32-S3 Super Mini Board Reference](docs/esp32-s3-super-mini-board.md)** - Complete board pinout, safe pins, and specifications ([source](https://www.espboards.dev/esp32/esp32-s3-super-mini/))
-- **[TMC2209 Features](docs/tmc2209-guide.md)** - Driver capabilities and configuration
+- **[TMC2209 Features](docs/tmc2209-guide.md)** - Stepper driver capabilities and configuration
+- **[DC Motor Guide](docs/dc-motor-guide.md)** - RZ7899-MS H-bridge specs and DC motor control
 
 ---
 
@@ -394,6 +461,12 @@ Note:   Performs software reset via esp_restart()
 2. Reduce motor current
 3. Add active cooling (fan)
 4. Check for short circuits
+
+### DC Motor Not Running
+1. Check H-bridge power connections (VM)
+2. Verify GPIO 8/9 connections to FI/BI
+3. Test with 'f' command - motor should spin
+4. Try increasing speed with 'p' command (e.g., 200)
 
 ---
 

@@ -25,14 +25,14 @@ ESP32-S3 GPIO 1 = TX (UART transmit)
 ### Wiring Method: Single-Wire with External Resistor
 
 ```
-ESP32-S3                          TMC2209 v1.3
---------                          ------------
+ESP32-S3                                    TMC2209 v1.3
+--------                                    ------------
 
-GPIO 1 (TX) ───┬
-               ├──── 1kΩ resistor ────► RX pin (left side)
-GPIO 2 (RX) ───┘
+GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
+      │
+      └─────────────────────────────────────► PDN_UART/RX pin (left side)
 
-                                     TX pin = NOT CONNECTED
+                                              TX pin = NOT CONNECTED
 ```
 
 ### Why This Works
@@ -42,15 +42,14 @@ GPIO 2 (RX) ───┘
    - RX and TX pins on the board are connected via resistors to this line
 
 2. **Single-Wire Protocol:**
-   - ESP32 TX and RX must be tied together for half-duplex
-   - External 1kΩ resistor prevents bus contention
-   - TMC2209 RX has 0Ω onboard resistor (direct connection)
-   - TMC2209 TX has 1kΩ onboard resistor (not used in this config)
+   - 1kΩ resistor between ESP32 TX (GPIO 1) and RX (GPIO 2) allows half-duplex
+   - GPIO 1 (TX_PIN) connects directly to TMC2209 PDN_UART/RX
+   - TMC2209 TX pin is left floating (not used in this config)
 
 3. **Signal Flow:**
-   - ESP32 transmits: Both GPIO 1 & 2 drive high → through 1kΩ → TMC2209 receives
-   - TMC2209 responds: Pulls line low → ESP32 GPIO 2 (RX) reads response
-   - 1kΩ resistor limits current when ESP32 and TMC2209 drive simultaneously
+   - ESP32 transmits: GPIO 1 drives signal → directly to TMC2209 PDN_UART/RX
+   - TMC2209 responds: Pulls PDN_UART line low → GPIO 1 → through 1kΩ → ESP32 GPIO 2 (RX) reads response
+   - 1kΩ resistor isolates TX from RX, allowing half-duplex on single wire
 
 ---
 
@@ -62,8 +61,8 @@ GPIO 2 (RX) ───┘
 ESP32-S3                          TMC2209 v1.3
 --------                          ------------
 
-GPIO 1 (TX) ─────────────────────► TX pin (1kΩ onboard)
-GPIO 2 (RX) ─────────────────────► RX pin (0Ω onboard)
+GPIO 1 (TX) ─────────────────────► TMC2209 TX pin (1kΩ onboard)
+GPIO 2 (RX) ─────────────────────► TMC2209 RX pin (0Ω onboard)
 ```
 
 **Why It Failed:**
@@ -116,22 +115,18 @@ TMC2209Stepper driver(&SERIAL_PORT, R_SENSE, DRIVER_ADDRESS);
    - ESP32-S3 Super Mini
    - TMC2209 v1.3 board
 
-2. **Connect ESP32 Pins Together:**
-   - Solder or breadboard: GPIO 1 and GPIO 2 to common junction
-   - Ensure good electrical contact
+2. **Install Resistor Between ESP32 Pins:**
+   - Connect 1kΩ resistor between GPIO 1 and GPIO 2
+   - Ensure good electrical contact on both ends
 
-3. **Install Resistor:**
-   - Connect one leg of 1kΩ resistor to GPIO 1/2 junction
-   - Other leg goes to TMC2209 RX pin
+3. **TMC2209 Connection:**
+   - Connect GPIO 1 (TX_PIN) directly to TMC2209 PDN_UART/RX pin (left side)
+   - Leave TMC2209 TX pin unconnected (floating)
 
-4. **TMC2209 Connection:**
-   - Connect resistor to RX pin (left side, 5th from top)
-   - Leave TX pin (left side, 6th from top) unconnected
-
-5. **Verify Wiring:**
-   - Measure resistance: GPIO 1 to TMC RX should be ~1kΩ
-   - Measure resistance: GPIO 2 to TMC RX should be ~1kΩ
-   - Measure resistance: GPIO 1 to GPIO 2 should be ~0Ω
+4. **Verify Wiring:**
+   - Measure resistance: GPIO 1 to TMC2209 PDN_UART/RX should be ~0Ω (direct connection)
+   - Measure resistance: GPIO 2 to TMC2209 PDN_UART/RX should be ~1kΩ (through resistor)
+   - Measure resistance: GPIO 1 to GPIO 2 should be ~1kΩ
 
 ---
 
@@ -229,21 +224,20 @@ All documentation has been updated to reflect the working configuration:
 **For Future Builds:**
 
 ```
-┌─────────────────────────────────────────┐
-│  TMC2209 UART - WORKING CONFIG          │
-├─────────────────────────────────────────┤
-│  ESP32-S3 GPIO 1 & 2 ───┬               │
-│                         │               │
-│                      1kΩ resistor       │
-│                         │               │
-│  TMC2209 RX pin ────────┘               │
-│  TMC2209 TX pin = NC (not connected)    │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  TMC2209 UART - WORKING CONFIG                       │
+├──────────────────────────────────────────────────────┤
+│  ESP32-S3 GPIO 1 (TX) ──[1kΩ]── GPIO 2 (RX)          │
+│        │                                             │
+│        └───────────────────→ TMC2209 PDN_UART/RX     │
+│                                                      │
+│  TMC2209 TX pin = NC (not connected)                 │
+└──────────────────────────────────────────────────────┘
 
 Pin Defs:  RX_PIN = 2, TX_PIN = 1
 Baud Rate: 115200
 Protocol:  8N1, no flow control
-Resistor:  1kΩ ±5% (brown-black-red)
+Resistor:  1kΩ ±5% (brown-black-red) between GPIO 1 and GPIO 2
 ```
 
 ---
@@ -280,7 +274,8 @@ Resistor:  1kΩ ±5% (brown-black-red)
 
 3. **Common mistakes:**
    - Using 10kΩ resistor instead of 1kΩ
-   - Forgetting to tie GPIO 1 and 2 together
+   - Putting resistor between GPIO junction and TMC (wrong! resistor goes between GPIO 1 and GPIO 2)
+   - Connecting GPIO 2 to TMC instead of GPIO 1 (GPIO 1 is the one that connects to TMC)
    - Connecting TMC TX pin (should be left floating)
    - Wrong pin numbers in code (#define RX_PIN)
 

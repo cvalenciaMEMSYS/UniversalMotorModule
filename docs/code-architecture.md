@@ -1,13 +1,13 @@
-# Code Architecture Deep Dive
+# Universal Motor Module - Code Architecture Deep Dive
 
-Complete technical documentation of the TMC2209 control firmware architecture.
+Complete technical documentation of the Universal Motor Module firmware architecture.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-UniversalStepperModule/
+UniversalMotorModule/
 ├── src/
 │   └── main.cpp              # Main firmware (all code in one file)
 ├── include/                  # Header files (none currently)
@@ -52,15 +52,26 @@ This is suitable for embedded systems with:
 #define ENABLE_PIN      4        // Digital output: Driver enable (active LOW)
 
 // UART Pins (Hardware Serial)
-#define RX_PIN          1        // UART receive from TMC2209
-#define TX_PIN          2        // UART transmit to TMC2209
+#define RX_PIN          2        // UART receive from TMC2209
+#define TX_PIN          1        // UART transmit to TMC2209
 #define SERIAL_PORT     Serial1  // Hardware UART peripheral
+
+// DC Motor H-Bridge (RZ7899-MS) pins
+// Note: VCC is powered by motor supply (3-25V), NOT ESP32 3.3V!
+#define DC_FI_PIN       8        // Forward Input (PWM) → Pin 2 on RZ7899
+#define DC_BI_PIN       9        // Backward Input (PWM) → Pin 1 on RZ7899
 ```
 
 **Why these pins?**
 - **GPIO 4-6**: Safe, no boot conflicts, support both input/output
 - **GPIO 1-2**: Hardware UART capable, no USB interference
 - **Serial1**: Dedicated UART peripheral (not Serial0/USB console)
+- **GPIO 8-9**: PWM-capable for DC motor speed control, no conflicts
+
+**RZ7899-MS H-Bridge Notes:**
+- VCC (Pin 4) connects to motor power (3-25V), NOT ESP32!
+- Only GPIO 8 → FI and GPIO 9 → BI connect to ESP32
+- Output pins 5+6 (FO) and 7+8 (BO) should be tied together to motor
 
 ### Pin Flexibility
 The ESP32-S3 **GPIO Matrix** allows UART on almost any pin:
@@ -79,22 +90,22 @@ SERIAL_PORT.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
 The TMC2209 uses **single-wire UART** (PDN_UART pin):
 
 ```
-ESP32-S3                          TMC2209 v1.3
+ESP32-S3                                    TMC2209 v1.3
                                    
-TX (GPIO 1) ──┬                                         
-              ├─── 1kΩ resistor ──► RX (0Ω resistor) ──► PDN_UART
-RX (GPIO 2) ──┘
+GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
+      │
+      └───────────────────────────────────► PDN_UART/RX pin
                  
-                 TX (1kΩ resistor) ──► (left unconnected)
+                                            TX pin = NOT CONNECTED
 ```
 
 **⚠️ TESTED CONFIGURATION:**
 
 After hardware testing, the **WORKING** method is:
 
-**✅ Option 1: Single wire + external resistor (CONFIRMED WORKING)**
-- ESP32 GPIO 1 (TX) and GPIO 2 (RX) tied together
-- Connected through 1kΩ external resistor to TMC2209 RX pin
+**✅ Option 1: Resistor between ESP pins (CONFIRMED WORKING)**
+- 1kΩ resistor connected **between** ESP32 GPIO 1 (TX) and GPIO 2 (RX)
+- GPIO 1 connects directly to TMC2209 PDN_UART/RX pin
 - TMC2209 TX pin left floating (not connected)
 - Simple, reliable, and confirmed functional
 
@@ -182,6 +193,29 @@ digitalWrite(ENABLE_PIN, LOW);  // Enable driver
 **Pin States:**
 - **STEP/DIR**: Initially LOW (motor stationary, CW direction)
 - **ENABLE**: LOW = enabled, HIGH = disabled (power saving)
+
+### 3b. DC Motor H-Bridge Initialization
+```cpp
+// Initialize DC Motor H-Bridge pins (RZ7899-MS)
+// Note: VCC powered by motor supply (3-25V), not ESP32!
+// Only control pins (FI/BI) connect to ESP32 GPIOs
+pinMode(DC_FI_PIN, OUTPUT);
+pinMode(DC_BI_PIN, OUTPUT);
+ledcAttach(DC_FI_PIN, 20000, 8);  // 20kHz, 8-bit
+ledcAttach(DC_BI_PIN, 20000, 8);
+ledcWrite(DC_FI_PIN, 0);          // Stopped
+ledcWrite(DC_BI_PIN, 0);
+```
+
+**DC Motor PWM Setup:**
+- **20kHz frequency** - Above audible range for quiet operation
+- **8-bit resolution** - 256 speed levels (0-255)
+- **Both pins start at 0** - Motor in coast (stopped) state
+
+**RZ7899-MS H-Bridge Specs:**
+- Supply voltage: 3.0V - 25.0V (motor power, not logic!)
+- Peak current: 6A, Continuous: 3-5A (with heatsink)
+- Pinout: BI(1), FI(2), GND(3), VCC(4), FO(5,6), BO(7,8)
 
 ### 4. Driver Wake-up Delay
 ```cpp
@@ -336,6 +370,11 @@ void handleCommand(char cmd) {
    - Read-only operations
    - Display information
    - No hardware changes
+
+4. **DC Motor Commands** (g, G, k, K, j, J, t)
+   - DC motor speed and direction control
+   - PWM-based operation
+   - Independent from stepper commands
 
 ---
 
@@ -618,7 +657,82 @@ displayDiag() ──► Read and display status
 
 ---
 
-## 🚀 Performance Considerations
+## � DC Motor Control Architecture
+
+### H-Bridge Basics (RZ7899-MS)
+
+The RZ7899-MS is a simple H-bridge that allows bidirectional DC motor control:
+
+```
+                  VM (Motor Power)
+                       │
+              ┌────────┴────────┐
+              │    H-Bridge     │
+    FI (PWM) ─┤                 ├─ OUT1 ──┐
+              │   RZ7899-MS     │         │
+    BI (PWM) ─┤                 ├─ OUT2 ──┼── DC Motor
+              └────────┬────────┘         │
+                       │                  │
+                      GND                 │
+                                         ─┘
+```
+
+### PWM Configuration
+
+The ESP32-S3 LEDC peripheral provides PWM for DC motor speed control:
+
+```cpp
+// PWM Setup in setup()
+ledcAttach(DC_FI_PIN, 20000, 8);  // 20kHz PWM, 8-bit resolution
+ledcAttach(DC_BI_PIN, 20000, 8);
+```
+
+**Parameters:**
+- **20kHz** - Above audible range for quiet operation
+- **8-bit resolution** - 256 speed levels (0-255)
+
+### Control Logic
+
+| Forward PWM | Backward PWM | Motor State |
+|-------------|--------------|-------------|
+| 0 | 0 | Coast (freewheeling) |
+| 50-255 | 0 | Forward, variable speed |
+| 0 | 50-255 | Backward, variable speed |
+| 255 | 255 | Brake (motor locked) |
+
+### DC Motor Functions
+
+```cpp
+void dcMotorControl(bool forward, int speed);  // Direction + speed
+void dcMotorStop();                            // Coast stop
+void dcMotorStatus();                          // Display status
+void changeDCMotorSpeed();                     // Interactive config
+```
+
+### State Variables
+
+```cpp
+bool dcMotorEnabled = false;    // System enabled
+int dcMotorSpeed = 128;         // PWM duty (0-255)
+bool dcMotorRunning = false;    // Currently running
+bool dcMotorForward = true;     // Direction
+```
+
+### DC Motor Command Reference
+
+| Command | Function | Description |
+|---------|----------|-------------|
+| `g` | Enable DC Motor | Enables the DC motor subsystem |
+| `G` | Disable DC Motor | Disables and stops DC motor |
+| `k` | Run Forward | Runs DC motor forward at current speed |
+| `K` | Run Backward | Runs DC motor backward at current speed |
+| `j` | Stop DC Motor | Coast stop (freewheeling) |
+| `J` | Brake DC Motor | Active brake (motor locked) |
+| `t` | Change Speed | Interactive speed configuration (0-255) |
+
+---
+
+## �🚀 Performance Considerations
 
 ### Maximum Step Rate
 

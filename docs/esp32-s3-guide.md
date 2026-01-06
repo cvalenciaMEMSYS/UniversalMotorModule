@@ -74,6 +74,17 @@ GPIO: 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21
 - ✅ Internal pull-up/pull-down available
 - ✅ Safe for any digital I/O
 
+**Pins Used in This Project:**
+| GPIO | Function | Notes |
+|------|----------|-------|
+| 1 | UART1 RX | TMC2209 communication |
+| 2 | UART1 TX | TMC2209 communication |
+| 4 | STEP | Stepper step signal |
+| 5 | DIR | Stepper direction |
+| 6 | ENABLE | Stepper driver enable |
+| 8 | DC Motor FI | H-bridge Forward Input |
+| 9 | DC Motor BI | H-bridge Backward Input |
+
 #### ⚠️ Strapping Pins (Use with Caution)
 ```
 GPIO 0:  Boot mode (LOW = download, HIGH = normal)
@@ -110,8 +121,10 @@ GPIO 35:  Often connected to 5V rail (check schematic!)
 | UART | Default Pins | Usage in Project | Notes |
 |------|-------------|------------------|-------|
 | **UART0** | GPIO 43 (TX), 44 (RX) | USB Serial console | Used by Serial object |
-| **UART1** | Configurable | TMC2209 communication | Used in this project |
+| **UART1** | GPIO 1 (RX), 2 (TX) | TMC2209 communication | Configured in this project |
 | **UART2** | Configurable | Available for expansion | Not used |
+
+> **Note:** With UART1 using GPIO 1 and 2, GPIO 8 and 9 remain available for other purposes such as DC motor H-bridge control (FI/BI signals).
 
 ### UART1 Configuration for TMC2209
 
@@ -366,10 +379,8 @@ digitalWrite(STEP_PIN, HIGH);   // Signal to driver IC
 ```cpp
 #include <Wire.h>
 
-// Default I2C on GPIO 8 (SDA), 9 (SCL)
-Wire.begin();
-
-// Custom pins
+// Default I2C on GPIO 8 (SDA), 9 (SCL) - but we use these for DC motor!
+// Use custom pins instead:
 Wire.begin(21, 22);  // SDA=21, SCL=22
 
 // Read from device
