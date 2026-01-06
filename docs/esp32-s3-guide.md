@@ -77,8 +77,8 @@ GPIO: 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21
 **Pins Used in This Project:**
 | GPIO | Function | Notes |
 |------|----------|-------|
-| 1 | UART1 RX | TMC2209 communication |
-| 2 | UART1 TX | TMC2209 communication |
+| 1 | UART1 TX | TMC2209 communication |
+| 2 | UART1 RX | TMC2209 communication |
 | 4 | STEP | Stepper step signal |
 | 5 | DIR | Stepper direction |
 | 6 | ENABLE | Stepper driver enable |
@@ -121,7 +121,7 @@ GPIO 35:  Often connected to 5V rail (check schematic!)
 | UART | Default Pins | Usage in Project | Notes |
 |------|-------------|------------------|-------|
 | **UART0** | GPIO 43 (TX), 44 (RX) | USB Serial console | Used by Serial object |
-| **UART1** | GPIO 1 (RX), 2 (TX) | TMC2209 communication | Configured in this project |
+| **UART1** | GPIO 1 (TX), 2 (RX) | TMC2209 communication | Configured in this project |
 | **UART2** | Configurable | Available for expansion | Not used |
 
 > **Note:** With UART1 using GPIO 1 and 2, GPIO 8 and 9 remain available for other purposes such as DC motor H-bridge control (FI/BI signals).
@@ -136,8 +136,8 @@ void setup() {
     SERIAL_PORT.begin(
         115200,      // Baud rate
         SERIAL_8N1,  // 8 data, no parity, 1 stop
-        1,           // RX pin (GPIO 1)
-        2            // TX pin (GPIO 2)
+        2,           // RX pin (GPIO 2)
+        1            // TX pin (GPIO 1)
     );
 }
 ```

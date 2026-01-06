@@ -29,8 +29,8 @@ ESP32-S3                                    TMC2209 v1.3
 --------                                    ------------
 
 GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
-      │
-      └─────────────────────────────────────► PDN_UART/RX pin (left side)
+                               │
+      PDN_UART/RX pin ←───────┘ (left side)
 
                                               TX pin = NOT CONNECTED
 ```
@@ -43,12 +43,12 @@ GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
 
 2. **Single-Wire Protocol:**
    - 1kΩ resistor between ESP32 TX (GPIO 1) and RX (GPIO 2) allows half-duplex
-   - GPIO 1 (TX_PIN) connects directly to TMC2209 PDN_UART/RX
+   - GPIO 2 (RX_PIN) connects directly to TMC2209 PDN_UART/RX
    - TMC2209 TX pin is left floating (not used in this config)
 
 3. **Signal Flow:**
-   - ESP32 transmits: GPIO 1 drives signal → directly to TMC2209 PDN_UART/RX
-   - TMC2209 responds: Pulls PDN_UART line low → GPIO 1 → through 1kΩ → ESP32 GPIO 2 (RX) reads response
+   - ESP32 transmits: GPIO 1 drives signal → through 1kΩ → GPIO 2 → to TMC2209 PDN_UART/RX
+   - TMC2209 responds: Pulls PDN_UART line low → ESP32 GPIO 2 (RX) reads response
    - 1kΩ resistor isolates TX from RX, allowing half-duplex on single wire
 
 ---
@@ -120,12 +120,12 @@ TMC2209Stepper driver(&SERIAL_PORT, R_SENSE, DRIVER_ADDRESS);
    - Ensure good electrical contact on both ends
 
 3. **TMC2209 Connection:**
-   - Connect GPIO 1 (TX_PIN) directly to TMC2209 PDN_UART/RX pin (left side)
+   - Connect GPIO 2 (RX_PIN) directly to TMC2209 PDN_UART/RX pin (left side)
    - Leave TMC2209 TX pin unconnected (floating)
 
 4. **Verify Wiring:**
-   - Measure resistance: GPIO 1 to TMC2209 PDN_UART/RX should be ~0Ω (direct connection)
-   - Measure resistance: GPIO 2 to TMC2209 PDN_UART/RX should be ~1kΩ (through resistor)
+   - Measure resistance: GPIO 2 to TMC2209 PDN_UART/RX should be ~0Ω (direct connection)
+   - Measure resistance: GPIO 1 to TMC2209 PDN_UART/RX should be ~1kΩ (through resistor)
    - Measure resistance: GPIO 1 to GPIO 2 should be ~1kΩ
 
 ---
@@ -275,7 +275,7 @@ Resistor:  1kΩ ±5% (brown-black-red) between GPIO 1 and GPIO 2
 3. **Common mistakes:**
    - Using 10kΩ resistor instead of 1kΩ
    - Putting resistor between GPIO junction and TMC (wrong! resistor goes between GPIO 1 and GPIO 2)
-   - Connecting GPIO 2 to TMC instead of GPIO 1 (GPIO 1 is the one that connects to TMC)
+   - Connecting GPIO 1 to TMC instead of GPIO 2 (GPIO 2 is the one that connects to TMC)
    - Connecting TMC TX pin (should be left floating)
    - Wrong pin numbers in code (#define RX_PIN)
 

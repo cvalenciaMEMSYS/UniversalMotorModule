@@ -15,33 +15,25 @@
  *   ESP32-S3 GPIO 5  →  TMC2209 STEP (Step pulses)
  *   ESP32-S3 GPIO 6  →  TMC2209 DIR  (Direction)
  * 
- * UART Pins (Option 1 - TESTED & WORKING ✅):
+ * UART Pins (Option 1 - TESTED & WORKING):
  *   ───────────────────────────────────────────
  *   ESP32-S3 GPIO 1 (TX_PIN) ──[1kΩ]── ESP32-S3 GPIO 2 (RX_PIN)
- *            │
- *            └──────────────────────→ TMC2209 PDN_UART/RX pin
+ *                                             │
+ *            TMC2209 PDN_UART/RX pin ←────────┘
  *
  *   TMC2209 TX pin = NOT CONNECTED
  *   
  *   This is the CONFIRMED WORKING method after testing.
  *   Requirements:
  *   - 1× 1kΩ resistor (1/4W or 1/8W) between GPIO 1 and GPIO 2
- *   - Wire from GPIO 1 directly to TMC2209 PDN_UART/RX pin
+ *   - Wire from GPIO 2 directly to TMC2209 PDN_UART/RX pin
  *   - TMC2209 TX pin left floating
- * 
- * UART Pins (Option 2 - NOT TESTED):
- *   ──────────────────────────────────
- *   ESP32-S3 GPIO 1  →  TMC2209 TX pin
- *   ESP32-S3 GPIO 2  →  TMC2209 RX pin
- *   
- *   This dual-wire method did NOT work in initial testing.
- *   Use Option 1 (resistor method) instead.
  * 
  * Power Pins:
  *   ESP32-S3 3.3V    →  TMC2209 VIO (Logic power)
  *   ESP32-S3 GND     →  TMC2209 GND (Common ground)
- *   12-28V PSU (+)   →  TMC2209 VS  (Motor power)
- *   12-28V PSU (-)   →  Common GND
+ *   4.75-28V PSU (+)   →  TMC2209 VS  (Motor power)
+ *   4.75-28V PSU (-)   →  Common GND
  * 
  * Motor Pins:
  *   TMC2209 A1, A2   →  Motor Coil A
@@ -94,6 +86,13 @@
 #define DC_FI_PIN       8        // Forward Input (H-bridge)
 #define DC_BI_PIN       9        // Backward Input (H-bridge)
 
+// PWM Channels for DC Motor (ESP32 Arduino Core 2.x uses explicit channels)
+// See docs/arduino-core-version.md for why we use the 2.x LEDC API
+#define DC_FI_CHANNEL   0        // LEDC channel for forward PWM
+#define DC_BI_CHANNEL   1        // LEDC channel for backward PWM
+#define DC_PWM_FREQ     20000    // 20kHz PWM frequency
+#define DC_PWM_RES      8        // 8-bit resolution (0-255)
+
 // =============================================================================
 // DRIVER CONFIGURATION
 // =============================================================================
@@ -102,8 +101,8 @@
 #define R_SENSE         0.11f    // Sense resistor value (TMC2209 v1.3)
 
 #define MOTOR_STEPS     200      // Steps per revolution (1.8° motor)
-#define MICROSTEPS      16       // Default microstepping
-#define RMS_CURRENT     800      // Default motor current (mA)
+#define MICROSTEPS      1       // Default microstepping
+#define RMS_CURRENT     400      // Default motor current (mA)
 #define STALL_VALUE     10       // StallGuard threshold
 
 // Speed limits
@@ -186,27 +185,27 @@ void setup() {
     pinMode(DIR_PIN, OUTPUT);
     pinMode(ENABLE_PIN, OUTPUT);
     
-    // Enable driver (active LOW)
-    digitalWrite(ENABLE_PIN, LOW);
-    enableState = true;
-    
-    // Initialize DC Motor H-Bridge pins
-    pinMode(DC_FI_PIN, OUTPUT);
-    pinMode(DC_BI_PIN, OUTPUT);
-    // Attach PWM to pins (ESP32-S3 LEDC)
-    ledcAttach(DC_FI_PIN, 20000, 8);  // 20kHz PWM, 8-bit resolution
-    ledcAttach(DC_BI_PIN, 20000, 8);
-    // Ensure motor is stopped
-    ledcWrite(DC_FI_PIN, 0);
-    ledcWrite(DC_BI_PIN, 0);
-    Serial.println("✓ DC Motor H-Bridge initialized (GPIO 8, 9)");
-    
+    // Disable driver (active LOW)
+    digitalWrite(ENABLE_PIN, HIGH);
+    enableState = false;
     // Initial pin states
     digitalWrite(STEP_PIN, LOW);
     digitalWrite(DIR_PIN, LOW);
     
+    // Initialize DC Motor H-Bridge pins with PWM
+    // Using Arduino-ESP32 Core 2.x LEDC API (channel-based)
+    // See docs/arduino-core-version.md for rationale
+    ledcSetup(DC_FI_CHANNEL, DC_PWM_FREQ, DC_PWM_RES);  // Configure channel 0
+    ledcSetup(DC_BI_CHANNEL, DC_PWM_FREQ, DC_PWM_RES);  // Configure channel 1
+    ledcAttachPin(DC_FI_PIN, DC_FI_CHANNEL);            // Attach GPIO 8 to channel 0
+    ledcAttachPin(DC_BI_PIN, DC_BI_CHANNEL);            // Attach GPIO 9 to channel 1
+    // Ensure motor is stopped
+    ledcWrite(DC_FI_CHANNEL, 0);
+    ledcWrite(DC_BI_CHANNEL, 0);
+    Serial.println("✓ DC Motor H-Bridge initialized (GPIO 8, 9)");
+    
     // Wait for driver power stabilization
-    delay(100);
+    delay(200);
     
     // Initialize TMC2209 driver
     Serial.println("Configuring TMC2209 driver...");
@@ -813,12 +812,13 @@ void testConnection() {
         Serial.println("✗ UART communication FAILED");
         Serial.println();
         Serial.println("Wiring check for Option 2 (Direct):");
-        Serial.println("  ESP32 GPIO 2 (TX) ──→ TMC2209 RX pin");
-        Serial.println("  ESP32 GPIO 1 (RX) ←── TMC2209 TX pin");
+        Serial.println("  ESP32 GPIO 1 (TX) ──→ TMC2209 TX pin");
+        Serial.println("  ESP32 GPIO 2 (RX) ←── TMC2209 RX pin");
         Serial.println();
         Serial.println("Wiring check for Option 1 (1K resistor):");
-        Serial.println("  ESP32 GPIO 1 & 2 ─┬─ 1kΩ ─→ TMC2209 RX");
-        Serial.println("                    └──────── (leave TX unconnected)");
+        Serial.println("  GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)");
+        Serial.println("                                 └──────── TMC2209 PDN_UART/RX pin");
+        Serial.println("TMC2209 TX pin = NOT CONNECTED");
         Serial.println();
         Serial.println("Also check:");
         Serial.println("  - VIO has 3.3V from ESP32");
@@ -842,13 +842,13 @@ void swapUartPins() {
     delay(50);
     
     if (uartPinsSwapped) {
-        // Swap: RX on GPIO2, TX on GPIO1
+        // Swap: RX on GPIO1, TX on GPIO2 (inverted from working config)
         SERIAL_PORT.begin(115200, SERIAL_8N1, TX_PIN, RX_PIN);
-        Serial.println("UART pins SWAPPED: RX=GPIO2, TX=GPIO1");
+        Serial.println("UART pins SWAPPED: RX=GPIO1, TX=GPIO2");
     } else {
-        // Normal: RX on GPIO1, TX on GPIO2
+        // Normal (Working): RX on GPIO2, TX on GPIO1
         SERIAL_PORT.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
-        Serial.println("UART pins NORMAL: RX=GPIO1, TX=GPIO2");
+        Serial.println("UART pins NORMAL: RX=GPIO2, TX=GPIO1");
     }
     
     delay(100);
@@ -929,12 +929,13 @@ void dcMotorControl(bool forward, int speed) {
     dcMotorForward = forward;
     dcMotorSpeed = speed;
     
+    // Using channel numbers (2.x API), not pin numbers
     if (forward) {
-        ledcWrite(DC_BI_PIN, 0);       // Ensure backward is off
-        ledcWrite(DC_FI_PIN, speed);   // Forward at speed
+        ledcWrite(DC_BI_CHANNEL, 0);       // Ensure backward is off
+        ledcWrite(DC_FI_CHANNEL, speed);   // Forward at speed
     } else {
-        ledcWrite(DC_FI_PIN, 0);       // Ensure forward is off
-        ledcWrite(DC_BI_PIN, speed);   // Backward at speed
+        ledcWrite(DC_FI_CHANNEL, 0);       // Ensure forward is off
+        ledcWrite(DC_BI_CHANNEL, speed);   // Backward at speed
     }
 }
 
@@ -943,8 +944,8 @@ void dcMotorControl(bool forward, int speed) {
  */
 void dcMotorStop() {
     dcMotorRunning = false;
-    ledcWrite(DC_FI_PIN, 0);
-    ledcWrite(DC_BI_PIN, 0);
+    ledcWrite(DC_FI_CHANNEL, 0);
+    ledcWrite(DC_BI_CHANNEL, 0);
 }
 
 /**

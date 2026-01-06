@@ -45,15 +45,15 @@ GND        →      GND (Common ground)
 **✅ WORKING METHOD (Resistor - TESTED):**
 ```
 GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
-      │
-      └──────────────────→ TMC2209 PDN_UART/RX pin
+                               │
+      TMC2209 PDN_UART/RX pin ←┘
 
 TMC2209 TX pin = NOT CONNECTED
 ```
 
 **Wiring Steps:**
 1. Connect 1kΩ resistor between GPIO 1 and GPIO 2
-2. From GPIO 1 (not GPIO 2), connect directly to TMC2209 PDN_UART/RX pin
+2. From GPIO 2 (not GPIO 1), connect directly to TMC2209 PDN_UART/RX pin
 3. Leave TMC2209 TX pin floating (not connected)
 
 **❌ Option 2 - Dual Wire (NOT WORKING):**
@@ -389,8 +389,8 @@ Output: DC Motor STOPPED (coast)
 #define STEP_PIN        5        // Step pulses
 #define DIR_PIN         6        // Direction
 #define ENABLE_PIN      4        // Enable (LOW = on)
-#define RX_PIN          1        // UART receive
-#define TX_PIN          2        // UART transmit
+#define RX_PIN          2        // UART receive
+#define TX_PIN          1        // UART transmit
 
 #define MOTOR_STEPS     200      // 1.8° motor
 #define MICROSTEPS      16       // 16x microstepping

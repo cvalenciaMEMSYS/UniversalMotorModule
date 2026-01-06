@@ -33,15 +33,15 @@ Note: RZ7899-MS VCC (Pin 4) connects to motor power (3-25V), NOT ESP32!
      ESP32-S3                                TMC2209 v1.3
     
      GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
-          │
-          └─────────────────────────────────── PDN_UART/RX pin (left side)
+                                   │
+     TMC2209 PDN_UART/RX pin ←─────┘ (left side)
      
      TX pin (left side) = Leave unconnected
 ```
 
 **What you need:**
 - 1× 1kΩ resistor (brown-black-red or 102) between GPIO 1 and GPIO 2
-- 1× wire from GPIO 1 directly to TMC2209 PDN_UART/RX pin
+- 1× wire from GPIO 2 directly to TMC2209 PDN_UART/RX pin
 - TMC2209 TX pin left floating
 
 **⚠️ IMPORTANT:** This method was confirmed working after testing. The dual-wire method (Option 2) did NOT work.
@@ -145,7 +145,7 @@ The RZ7899-MS is a powerful H-bridge driver for DC brushed motors with PWM speed
 ### UART Connection (Use Option 1 ONLY):
 **✅ Option 1 (WORKING):**
 - [ ] 1kΩ resistor connected between ESP32 GPIO 1 and GPIO 2
-- [ ] ESP32 GPIO 1 connects directly to TMC2209 PDN_UART/RX pin
+- [ ] ESP32 GPIO 2 connects directly to TMC2209 PDN_UART/RX pin
 - [ ] TMC2209 TX pin left unconnected
 
 **❌ Option 2 (NOT WORKING - DO NOT USE):**
@@ -187,7 +187,7 @@ The RZ7899-MS is a powerful H-bridge driver for DC brushed motors with PWM speed
 │  │  GPIO 6 ─────┼───────────┼┐ │ │   │      │                 │
 │  └──────────────┘           ││ │ │   │      │                 │
 │                             ││ │ │   │      │                 │
-│  (GPIO 1 connects to TMC)   ││ │ │   │      │                 │
+│  (GPIO 2 connects to TMC)   ││ │ │   │      │                 │
 │                    ┌────────┘│ │ │   │      │                 │
 │                    │         │ │ │   │      │                 │
 └────────────────────┼─────────┼─┼─┼───┼──────┼─────────────────┘
@@ -201,7 +201,7 @@ The RZ7899-MS is a powerful H-bridge driver for DC brushed motors with PWM speed
 │  │ EN    ○◄────────┼─────────┼─┼─┘   │      │           │     │
 │  │ MS1   ○         │         │ │     │      │           │     │
 │  │ MS2   ○         │         │ │     │      │           │     │
-│  │ RX    ○◄────────┘ (GPIO 1)│ │     │      │  ○ VS────┼──► 12-28V
+│  │ RX    ○◄────────┘ (GPIO 2)│ │     │      │  ○ VS────┼──► 12-28V
 │  │ TX    ○  (NOT CONNECTED)  │ │     │      │  ○ GND───┼──► PSU GND
 │  │ CLK   ○                   │ │     │      │  ○ A2────┼──► Motor A
 │  │ STEP  ○◄──────────────────┘ │     │      │  ○ A1────┼──► Motor A
@@ -213,8 +213,8 @@ The RZ7899-MS is a powerful H-bridge driver for DC brushed motors with PWM speed
 └────────────────────────────────────────────────────────────────┘
 
 Note: 1kΩ resistor is between GPIO 1 and GPIO 2.
-      GPIO 1 connects DIRECTLY to TMC2209 PDN_UART/RX pin.
-      GPIO 2 does NOT connect to TMC2209 (only to resistor).
+      GPIO 2 connects DIRECTLY to TMC2209 PDN_UART/RX pin.
+      GPIO 1 does NOT connect to TMC2209 (only to resistor).
 ```
 
 ---

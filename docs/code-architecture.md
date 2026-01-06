@@ -93,8 +93,8 @@ The TMC2209 uses **single-wire UART** (PDN_UART pin):
 ESP32-S3                                    TMC2209 v1.3
                                    
 GPIO 1 (TX_PIN) ──[1kΩ]── GPIO 2 (RX_PIN)
-      │
-      └───────────────────────────────────► PDN_UART/RX pin
+                               │
+      PDN_UART/RX pin ←───────┘
                  
                                             TX pin = NOT CONNECTED
 ```
@@ -105,7 +105,7 @@ After hardware testing, the **WORKING** method is:
 
 **✅ Option 1: Resistor between ESP pins (CONFIRMED WORKING)**
 - 1kΩ resistor connected **between** ESP32 GPIO 1 (TX) and GPIO 2 (RX)
-- GPIO 1 connects directly to TMC2209 PDN_UART/RX pin
+- GPIO 2 connects directly to TMC2209 PDN_UART/RX pin
 - TMC2209 TX pin left floating (not connected)
 - Simple, reliable, and confirmed functional
 
