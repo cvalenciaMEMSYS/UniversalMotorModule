@@ -22,7 +22,7 @@ Full-featured motor control system supporting TMC2209 stepper drivers and RZ7899
 ### 1. Clone & Install
 ```bash
 git clone <your-repo-url>
-cd UniversalStepperModule
+cd UniversalMotorModule
 pio run  # Auto-installs TMCStepper library
 ```
 
