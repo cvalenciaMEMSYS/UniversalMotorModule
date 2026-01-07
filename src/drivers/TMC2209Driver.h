@@ -31,6 +31,7 @@
 #include <Arduino.h>
 #include <TMCStepper.h>
 #include "IMotorDriver.h"
+#include "MCPWMStepper.h"
 #include "../config/PinConfig.h"
 
 /**
@@ -120,6 +121,12 @@ public:
     void setStealthChop(bool enable);
     
     /**
+     * @brief Enable/disable PWM autoscale (automatic current reduction)
+     * @param enable true = auto reduce current based on load, false = full current always
+     */
+    void setPWMAutoscale(bool enable);
+    
+    /**
      * @brief Scan for TMC2209 drivers on all 4 addresses
      */
     void scanAddresses();
@@ -165,6 +172,9 @@ private:
     // TMCStepper library driver object
     TMC2209Stepper* _driver;
     
+    // Hardware PWM stepper
+    MCPWMStepper _mcpwmStepper;
+    
     // UART mode flag (false = Step/Dir fallback)
     bool _uartMode;
     
@@ -173,6 +183,7 @@ private:
     int32_t _position;
     int32_t _targetPosition;
     bool _moving;
+    uint32_t _lastFreqUpdate;  // Track last frequency update time
     
     // Configuration
     uint16_t _runCurrentMA;
@@ -206,8 +217,7 @@ private:
     
     // Internal methods
     void configureDriver();
-    void doStep();
-    void calculateStepInterval();
+    void updateHardwareFrequency();  // Update MCPWM frequency based on current speed
     uint8_t microStepsToMRES(uint16_t ms);
     uint16_t mrestoMicrosteps(uint8_t mres);
     

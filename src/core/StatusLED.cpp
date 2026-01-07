@@ -35,6 +35,7 @@ StatusLED::StatusLED()
     , _driverType(DriverType::UNKNOWN)
     , _accelProfile(AccelProfile::CONSTANT)
     , _brightness(50)  // 50/255 = ~20% brightness (NeoPixels are bright!)
+    , _motorEnabled(true)  // Start with motor enabled (full brightness)
     , _baseColor(0, 0, 50)          // Start with blue
     , _displayedColor(0, 0, 0)
     , _animation(AnimationType::ANIM_NONE)
@@ -218,6 +219,20 @@ void StatusLED::stopPulse() {
     applyColor(_baseColor);
 }
 
+void StatusLED::setMotorEnabled(bool enabled) {
+    if (_motorEnabled != enabled) {
+        _motorEnabled = enabled;
+        
+        // Recalculate base color with new brightness multiplier
+        _baseColor = getStatusColor(_status);
+        
+        // Apply immediately if not in a temporary animation
+        if (_animation != AnimationType::ANIM_FLASH) {
+            applyColor(_baseColor);
+        }
+    }
+}
+
 void StatusLED::off() {
     _animation = AnimationType::ANIM_NONE;
     applyColor(0, 0, 0);
@@ -230,32 +245,37 @@ void StatusLED::off() {
 LEDColor StatusLED::getDriverColor() {
     LEDColor color;
     
+    // Brightness multiplier: 1.0 when enabled, 0.5 when disabled
+    float brightnessMult = _motorEnabled ? 1.0f : 0.5f;
+    uint8_t effectiveBrightness = (uint8_t)(_brightness * brightnessMult);
+    
     // Base colors for each driver type
     switch (_driverType) {
         case DriverType::TMC2209:
-            color = LEDColor(0, _brightness, 0);  // Green
+            color = LEDColor(0, effectiveBrightness, 0);  // Green
             break;
         case DriverType::TMC2208:
-            color = LEDColor(0, _brightness, (uint8_t)(_brightness * 0.8f));  // Cyan
+            color = LEDColor(0, effectiveBrightness, (uint8_t)(effectiveBrightness * 0.8f));  // Cyan
             break;
         case DriverType::DC_MOTOR:
-            color = LEDColor(0, (uint8_t)(_brightness * 0.4f), _brightness);  // Blue
+            color = LEDColor(0, (uint8_t)(effectiveBrightness * 0.4f), effectiveBrightness);  // Blue
             break;
         case DriverType::UNKNOWN:
         default:
-            color = LEDColor(_brightness, _brightness, _brightness);  // White
+            color = LEDColor(effectiveBrightness, effectiveBrightness, effectiveBrightness);  // White
             break;
     }
     
-    // Apply acceleration profile modifier
+    // Apply acceleration profile modifier (also scaled by brightness)
+    uint8_t tintAmount = (uint8_t)(50 * brightnessMult);
     switch (_accelProfile) {
         case AccelProfile::TRAPEZOIDAL:
             // Yellow tint: add red
-            color.r = min(255, color.r + 50);
+            color.r = min(255, color.r + tintAmount);
             break;
         case AccelProfile::S_CURVE:
             // Purple tint: add blue
-            color.b = min(255, color.b + 50);
+            color.b = min(255, color.b + tintAmount);
             break;
         case AccelProfile::CONSTANT:
         default:

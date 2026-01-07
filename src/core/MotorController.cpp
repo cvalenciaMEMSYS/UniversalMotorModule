@@ -74,14 +74,18 @@ void MotorController::update() {
         // Detect movement completion
         bool isCurrentlyMoving = _driver->isMoving();
         if (_wasMoving && !isCurrentlyMoving) {
-            // Movement just finished
+            // Movement just finished - check for errors immediately
             Serial.println("Complete");
+            MotorStatus status = _driver->getStatus();
+            _errorFlags = status.errorFlags;
+            _lastErrorPollTime = millis();  // Reset poll timer
         }
         _wasMoving = isCurrentlyMoving;
         
-        // Poll for errors periodically
+        // Poll for errors periodically when NOT moving
+        // UART reads block the stepping loop causing visible jerks during motion
         uint32_t now = millis();
-        if (now - _lastErrorPollTime >= ERROR_POLL_INTERVAL_MS) {
+        if (!isCurrentlyMoving && (now - _lastErrorPollTime >= ERROR_POLL_INTERVAL_MS)) {
             _lastErrorPollTime = now;
             MotorStatus status = _driver->getStatus();
             _errorFlags = status.errorFlags;
@@ -235,6 +239,59 @@ void MotorController::processCommand(const String& cmd) {
             Serial.println("stepdir command only applies to TMC2209/TMC2208 drivers");
         }
     }
+    else if (command.equalsIgnoreCase("stealthchop")) {
+        // Enable StealthChop mode (silent)
+        MotorType type = _driver->getType();
+        if (type == MotorType::STEPPER_TMC2209) {
+            auto* tmc = static_cast<TMC2209Driver*>(_driver);
+            tmc->setStealthChop(true);
+        } else if (type == MotorType::STEPPER_TMC2208) {
+            auto* tmc = static_cast<TMC2208Driver*>(_driver);
+            tmc->setStealthChop(true);
+        } else {
+            Serial.println("StealthChop only applies to TMC drivers");
+        }
+    }
+    else if (command.equalsIgnoreCase("spreadcycle")) {
+        // Enable SpreadCycle mode (high torque, works with fullstep)
+        MotorType type = _driver->getType();
+        if (type == MotorType::STEPPER_TMC2209) {
+            auto* tmc = static_cast<TMC2209Driver*>(_driver);
+            tmc->setStealthChop(false);
+        } else if (type == MotorType::STEPPER_TMC2208) {
+            auto* tmc = static_cast<TMC2208Driver*>(_driver);
+            tmc->setStealthChop(false);
+        } else {
+            Serial.println("SpreadCycle only applies to TMC drivers");
+        }
+    }
+    else if (command.startsWith("pwmautoscale ")) {
+        // Toggle PWM autoscale (automatic current reduction)
+        String modeStr = command.substring(13);
+        modeStr.trim();
+        modeStr.toLowerCase();
+        
+        bool enable;
+        if (modeStr == "on" || modeStr == "1" || modeStr == "true") {
+            enable = true;
+        } else if (modeStr == "off" || modeStr == "0" || modeStr == "false") {
+            enable = false;
+        } else {
+            Serial.println("Usage: pwmautoscale on|off");
+            return;
+        }
+        
+        MotorType type = _driver->getType();
+        if (type == MotorType::STEPPER_TMC2209) {
+            auto* tmc = static_cast<TMC2209Driver*>(_driver);
+            tmc->setPWMAutoscale(enable);
+        } else if (type == MotorType::STEPPER_TMC2208) {
+            auto* tmc = static_cast<TMC2208Driver*>(_driver);
+            tmc->setPWMAutoscale(enable);
+        } else {
+            Serial.println("PWM autoscale only applies to TMC drivers");
+        }
+    }
     
     // === UNKNOWN ===
     
@@ -325,6 +382,9 @@ void MotorController::printHelp() {
     Serial.println("│    stepdir on        Switch to Step/Dir fallback mode       │");
     Serial.println("│    stepdir off       Re-enable UART mode                    │");
     Serial.println("│    reconfigure       Re-apply UART settings                 │");
+    Serial.println("│    stealthchop       Silent mode (may not work at fullstep) │");
+    Serial.println("│    spreadcycle       High-torque mode (works at fullstep)   │");
+    Serial.println("│    pwmautoscale on/off  Toggle automatic current reduction  │");
     Serial.println("│                                                             │");
     Serial.println("│  Status/Debug:                                              │");
     Serial.println("│    ? or status       Show current status                    │");
@@ -414,6 +474,15 @@ void MotorController::setJerk(float jerk) {
     // Update profile type based on jerk value
     if (jerk > 0) {
         _profile.type = VelocityProfileType::S_CURVE;
+        
+        // S-curve requires acceleration to be set - auto-configure if missing
+        if (_profile.acceleration <= 0) {
+            // Default: ramp to max speed in 1 second
+            _profile.acceleration = _profile.maxSpeed;
+            Serial.print("Note: Auto-set acceleration to ");
+            Serial.print(_profile.acceleration);
+            Serial.println(" steps/sec² for S-curve");
+        }
     } else {
         // jerk = 0: revert to TRAPEZOIDAL if accel > 0, otherwise CONSTANT
         if (_profile.acceleration > 0) {
@@ -434,12 +503,14 @@ void MotorController::setJerk(float jerk) {
 void MotorController::enableMotor() {
     if (_driver != nullptr) {
         _driver->enable();
+        statusLED.setMotorEnabled(true);
     }
 }
 
 void MotorController::disableMotor() {
     if (_driver != nullptr) {
         _driver->disable();
+        statusLED.setMotorEnabled(false);
     }
 }
 

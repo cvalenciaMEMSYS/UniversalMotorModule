@@ -77,14 +77,20 @@ TMC2209Driver::~TMC2209Driver() {
 bool TMC2209Driver::init() {
     Serial.println("TMC2209 Driver: Initializing...");
     
-    // Configure GPIO pins
+    // Initialize Enable pin
     pinMode(_enPin, OUTPUT);
-    pinMode(_stepPin, OUTPUT);
-    pinMode(_dirPin, OUTPUT);
+    disable();  // Start disabled
     
-    digitalWrite(_enPin, HIGH);   // Start disabled
-    digitalWrite(_stepPin, LOW);
+    // Initialize direction pin (MCPWM will also configure it)
+    pinMode(_dirPin, OUTPUT);
     digitalWrite(_dirPin, LOW);
+    
+    // Initialize MCPWM hardware stepper
+    if (!_mcpwmStepper.init((gpio_num_t)_stepPin, (gpio_num_t)_dirPin)) {
+        Serial.println("TMC2209 Driver: MCPWM initialization failed!");
+        return false;
+    }
+    Serial.println("TMC2209 Driver: MCPWM initialized successfully");
     
     _enabled = false;
     
@@ -213,8 +219,8 @@ void TMC2209Driver::move(int32_t steps) {
     _totalMoveSteps = abs(steps);
     _moveDirection = steps > 0 ? 1 : -1;
     
-    // Set direction pin
-    digitalWrite(_dirPin, steps > 0 ? HIGH : LOW);
+    // Set direction
+    _mcpwmStepper.setDirection(_moveDirection > 0);
     
     // Plan motion based on profile type
     if (_profile.type == VelocityProfileType::CONSTANT) {
@@ -231,7 +237,11 @@ void TMC2209Driver::move(int32_t steps) {
     }
     
     _moving = true;
-    calculateStepInterval();
+    
+    // Set initial speed and start hardware PWM
+    updateHardwareFrequency();
+    _mcpwmStepper.start();
+    
     _lastStepTime = micros();
 }
 
@@ -246,11 +256,13 @@ void TMC2209Driver::stop() {
     // For controlled deceleration, use setMaxSpeed(0) instead
     _moving = false;
     _currentSpeed = 0;
+    _mcpwmStepper.stop();
 }
 
 void TMC2209Driver::emergencyStop() {
     _moving = false;
     _currentSpeed = 0;
+    _mcpwmStepper.stop();
     // Target stays where we stopped
     _targetPosition = _position;
 }
@@ -264,46 +276,50 @@ void TMC2209Driver::update() {
     
     uint32_t now = micros();
     
-    // Check if it's time for next step
-    if ((now - _lastStepTime) >= _stepInterval) {
+    // Update speed profile (acceleration/deceleration) at reasonable rate
+    // This determines what _currentSpeed should be, but doesn't update hardware yet
+    static uint32_t lastProfileUpdate = 0;
+    if (now - lastProfileUpdate >= 5000) {  // Update profile every 5ms
+        lastProfileUpdate = now;
+        
+        // Calculate steps done so far (based on time since move started)
+        float elapsedSec = (now - _lastStepTime) / 1000000.0f;
+        int32_t estimatedSteps = (int32_t)(_currentSpeed * elapsedSec);
+        
+        if (estimatedSteps > 0) {
+            _position += _moveDirection * estimatedSteps;
+            _lastStepTime = now;
+        }
+        
         // Check if we've reached target
-        if (_position == _targetPosition) {
+        if (abs(_targetPosition - _position) <= 10) {
+            _position = _targetPosition;
             _moving = false;
             _currentSpeed = 0;
+            _mcpwmStepper.stop();
             return;
         }
         
-        // Do a step
-        doStep();
-        _lastStepTime = now;
-        
-        // Update speed based on profile type
+        // Update speed based on profile type (changes _currentSpeed)
         if (_profile.type == VelocityProfileType::TRAPEZOIDAL) {
             updateTrapezoidalSpeed();
         } else if (_profile.type == VelocityProfileType::S_CURVE) {
             updateSCurveSpeed();
         }
-        // CONSTANT profile: speed stays fixed, no update needed
+        
+        // Update hardware frequency only if speed changed significantly
+        updateHardwareFrequency();
     }
 }
 
-void TMC2209Driver::doStep() {
-    // Generate step pulse
-    digitalWrite(_stepPin, HIGH);
-    delayMicroseconds(2);  // Minimum pulse width (TMC2209 requires ~100ns, 2µs is 20x margin)
-    digitalWrite(_stepPin, LOW);
-    
-    // Update position based on move direction
-    _position += _moveDirection;
-}
-
-void TMC2209Driver::calculateStepInterval() {
-    // Convert current speed (steps/sec) to interval (microseconds)
+void TMC2209Driver::updateHardwareFrequency() {
+    // Update MCPWM frequency - called at controlled rate (not every loop)
     float speed = _currentSpeed;
-    if (speed <= 0) speed = _maxSpeed;  // Fallback to max speed
-    if (speed <= 0) speed = 1;          // Safety
+    if (speed < 10.0f) speed = 10.0f;  // Minimum 10 steps/sec (MCPWM limit)
+    if (speed > 50000.0f) speed = 50000.0f;  // Maximum safe frequency
     
-    _stepInterval = MotionMath::calculateStepInterval(speed);
+    _mcpwmStepper.setFrequency(speed);
+    _lastFreqUpdate = micros();
 }
 
 // =============================================================================
@@ -359,8 +375,7 @@ void TMC2209Driver::updateTrapezoidalSpeed() {
         50.0f  // minSpeed
     );
     
-    // Update step interval based on new speed
-    calculateStepInterval();
+    // Hardware frequency update happens in update()
 }
 
 // =============================================================================
@@ -548,7 +563,7 @@ void TMC2209Driver::updateSCurveSpeed() {
     
     if (segmentLength <= 0) {
         _currentSpeed = _scurveVelocity[segment];
-        calculateStepInterval();
+        // Hardware frequency update happens in update()
         return;
     }
     
@@ -576,7 +591,7 @@ void TMC2209Driver::updateSCurveSpeed() {
     // Enforce minimum and maximum speed limits
     _currentSpeed = MotionMath::clampSpeed(_currentSpeed, 50.0f, _profile.maxSpeed);
     
-    calculateStepInterval();
+    // Hardware frequency update happens in update()
 }
 
 // =============================================================================
@@ -587,7 +602,7 @@ void TMC2209Driver::setMaxSpeed(float stepsPerSecond) {
     if (stepsPerSecond <= 0) stepsPerSecond = 1;
     _maxSpeed = stepsPerSecond;
     _profile.maxSpeed = stepsPerSecond;
-    calculateStepInterval();
+    // Hardware frequency update happens in update()
 }
 
 void TMC2209Driver::setCurrent(uint16_t runMA, uint16_t holdMA) {
@@ -606,26 +621,45 @@ void TMC2209Driver::setCurrent(uint16_t runMA, uint16_t holdMA) {
 }
 
 void TMC2209Driver::setMicrosteps(uint16_t microsteps) {
-    // Validate
+    // Validate - minimum 2 microsteps per Trinamic recommendations
     switch (microsteps) {
-        case 1: case 2: case 4: case 8: case 16:
+        case 2: case 4: case 8: case 16:
         case 32: case 64: case 128: case 256:
             break;
         default:
-            microsteps = 16;  // Default
+            if (microsteps < 2) {
+                Serial.println("TMC2209: ⚠️ Fullstep (1/1) not supported - minimum 1/2 microstepping");
+                Serial.println("         Fullstep is incompatible with StealthChop and causes unreliable operation.");
+                microsteps = 2;
+            } else {
+                microsteps = 16;  // Default
+            }
     }
     
     _microsteps = microsteps;
     
     if (_uartMode && _driver != nullptr) {
-        // Use direct CHOPCONF write for fullstep support
+        // CRITICAL: Ensure UART controls microsteps (not MS1/MS2 pins)
+        _driver->mstep_reg_select(true);
+        
+        // Set MRES in CHOPCONF register
         uint8_t mres = microStepsToMRES(microsteps);
         uint32_t chopconf = _driver->CHOPCONF();
         chopconf = (chopconf & 0xF0FFFFFF) | ((uint32_t)mres << 24);
         _driver->CHOPCONF(chopconf);
         
+        // Read back to verify
+        delay(10);
+        uint32_t readback = _driver->CHOPCONF();
+        uint8_t actualMres = (readback >> 24) & 0x0F;
+        
         Serial.print("TMC2209: Microsteps set to 1/");
-        Serial.println(_microsteps);
+        Serial.print(_microsteps);
+        Serial.print(" (MRES=");
+        Serial.print(mres);
+        Serial.print(", readback=");
+        Serial.print(actualMres);
+        Serial.println(actualMres == mres ? " ✓)" : " ⚠️ MISMATCH!)");
     } else {
         Serial.println("TMC2209: In Step/Dir mode - microsteps set by MS1/MS2 pins");
     }
@@ -634,7 +668,7 @@ void TMC2209Driver::setMicrosteps(uint16_t microsteps) {
 void TMC2209Driver::setAccelerationProfile(const AccelerationProfile& profile) {
     _profile = profile;
     _maxSpeed = profile.maxSpeed;
-    calculateStepInterval();
+    // Hardware frequency update happens in update()
 }
 
 // =============================================================================
@@ -813,6 +847,20 @@ uint16_t TMC2209Driver::getStallGuardResult() {
 void TMC2209Driver::setStealthChop(bool enable) {
     if (_driver == nullptr) return;
     _driver->en_spreadCycle(!enable);  // Inverted: spreadCycle OFF = StealthChop ON
+}
+
+void TMC2209Driver::setPWMAutoscale(bool enable) {
+    if (_uartMode && _driver != nullptr) {
+        _driver->pwm_autoscale(enable);
+        Serial.print("TMC2209: PWM autoscale ");
+        Serial.println(enable ? "ENABLED (current scales with load)" : "DISABLED (full current always)");
+        
+        if (!enable) {
+            Serial.println("  Note: Motor will draw full current even when idle - may run hotter");
+        }
+    } else {
+        Serial.println("TMC2209: Cannot set PWM autoscale in Step/Dir mode");
+    }
 }
 
 void TMC2209Driver::scanAddresses() {

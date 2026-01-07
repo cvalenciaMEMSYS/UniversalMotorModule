@@ -203,6 +203,13 @@ public:
     void stopPulse();
     
     /**
+     * @brief Set motor enabled state for brightness control
+     * When disabled, LED dims to 50% brightness.
+     * @param enabled true = full brightness, false = dimmed (50%)
+     */
+    void setMotorEnabled(bool enabled);
+    
+    /**
      * @brief Turn LED off
      */
     void off();
@@ -213,6 +220,7 @@ private:
     DriverType _driverType;
     AccelProfile _accelProfile;
     uint8_t _brightness;
+    bool _motorEnabled;             // Motor enabled state (affects brightness)
     
     // Color state tracking
     LEDColor _baseColor;        // The "normal" color to return to after animations

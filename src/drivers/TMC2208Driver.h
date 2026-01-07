@@ -45,6 +45,7 @@
 #include <TMCStepper.h>
 #include "IMotorDriver.h"
 #include "../config/PinConfig.h"
+#include "MCPWMStepper.h"
 
 /**
  * @brief TMC2208 driver implementation with UART control (fallback to Step/Dir)
@@ -120,6 +121,12 @@ public:
     void setStealthChop(bool enable);
     
     /**
+     * @brief Enable/disable PWM autoscale (automatic current reduction)
+     * @param enable true = auto reduce current based on load, false = full current always
+     */
+    void setPWMAutoscale(bool enable);
+    
+    /**
      * @brief Switch to Step/Dir only mode (fallback when UART unavailable)
      * @param enabled true = Step/Dir only, false = use UART
      * 
@@ -151,6 +158,9 @@ private:
     // TMCStepper library driver object
     TMC2208Stepper* _driver;
     
+    // MCPWM stepper for hardware PWM
+    MCPWMStepper _mcpwmStepper;
+    
     // UART mode flag (false = Step/Dir fallback)
     bool _uartMode;
     
@@ -159,6 +169,7 @@ private:
     int32_t _position;
     int32_t _targetPosition;
     bool _moving;
+    uint32_t _lastFreqUpdate;  // Track last frequency update time
     
     // Configuration
     uint16_t _runCurrentMA;
@@ -188,8 +199,7 @@ private:
     
     // Internal methods
     void configureDriver();  // UART configuration
-    void doStep();
-    void calculateStepInterval();
+    void updateHardwareFrequency();
     uint8_t microStepsToMRES(uint16_t ms);
     uint16_t mrestoMicrosteps(uint8_t mres);
     void planTrapezoidalMotion();
