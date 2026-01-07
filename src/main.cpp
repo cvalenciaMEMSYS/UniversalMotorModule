@@ -155,7 +155,10 @@ void loop() {
     SystemStatus currentLedStatus = statusLED.getStatus();
     SystemStatus targetStatus = SystemStatus::READY;  // Default
     
-    if (controller.isBusy()) {
+    // Priority: ERROR > MOVING > IDLE > READY
+    if (controller.hasError()) {
+        targetStatus = SystemStatus::ERROR;
+    } else if (controller.isBusy()) {
         targetStatus = SystemStatus::MOVING;
         lastActivityTime = millis();
     } else if (!controller.isReady()) {

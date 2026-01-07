@@ -160,11 +160,27 @@ public:
      */
     IMotorDriver* getDriver();
     
+    /**
+     * @brief Check if any critical error is active
+     * Critical errors: OVER_TEMP, SHORT_CIRCUIT, COMM_FAILURE
+     */
+    bool hasError() const;
+    
+    /**
+     * @brief Get current error flags
+     */
+    uint8_t getErrorFlags() const;
+
 private:
     IMotorDriver* _driver;
     AccelerationProfile _profile;
     bool _initialized;
     bool _wasMoving;  // Track movement state to detect completion
+    
+    // Error monitoring
+    uint8_t _errorFlags;               // Cached error flags from last poll
+    uint32_t _lastErrorPollTime;       // Last time we polled for errors
+    static constexpr uint32_t ERROR_POLL_INTERVAL_MS = 500;
     
     // Command parsing helpers
     void parseSetCommand(const String& params);

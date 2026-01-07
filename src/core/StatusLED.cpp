@@ -142,6 +142,12 @@ void StatusLED::setDriverType(DriverType type) {
 
 void StatusLED::setAccelProfile(AccelProfile profile) {
     _accelProfile = profile;
+    
+    // Recalculate base color to apply new profile tint immediately
+    // (unless we're in a flash animation - let it finish first)
+    if (_animation != AnimationType::ANIM_FLASH) {
+        _baseColor = getStatusColor(_status);
+    }
 }
 
 void StatusLED::flashCommandReceived() {
@@ -320,7 +326,8 @@ void StatusLED::processFlash() {
             _hasPendingStatus = false;
             setStatus(_pendingStatus);  // This will set appropriate animation
         } else {
-            // No pending status - restore base color
+            // No pending status - recalculate base color in case profile changed during flash
+            _baseColor = getStatusColor(_status);
             applyColor(_baseColor);
         }
     }

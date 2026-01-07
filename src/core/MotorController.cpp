@@ -6,6 +6,7 @@
 
 #include "MotorController.h"
 #include "../config/PinConfig.h"
+#include "StatusLED.h"
 
 // =============================================================================
 // CONSTRUCTOR / DESTRUCTOR
@@ -14,7 +15,9 @@
 MotorController::MotorController()
     : _driver(nullptr)
     , _initialized(false)
-    , _wasMoving(false) {
+    , _wasMoving(false)
+    , _errorFlags(MotorError::NONE)
+    , _lastErrorPollTime(0) {
     // Default profile: constant velocity
     _profile = AccelerationProfile::constant(DefaultMotorConfig::STEPPER_MAX_SPEED);
 }
@@ -73,6 +76,14 @@ void MotorController::update() {
             Serial.println("Complete");
         }
         _wasMoving = isCurrentlyMoving;
+        
+        // Poll for errors periodically
+        uint32_t now = millis();
+        if (now - _lastErrorPollTime >= ERROR_POLL_INTERVAL_MS) {
+            _lastErrorPollTime = now;
+            MotorStatus status = _driver->getStatus();
+            _errorFlags = status.errorFlags;
+        }
     }
 }
 
@@ -333,22 +344,48 @@ void MotorController::setMicrosteps(uint16_t ms) {
 
 void MotorController::setAcceleration(float accel) {
     _profile.acceleration = accel;
-    if (accel > 0 && _profile.type == VelocityProfileType::CONSTANT) {
-        _profile.type = VelocityProfileType::TRAPEZOIDAL;
+    
+    // Update profile type based on accel value
+    if (accel > 0) {
+        // If jerk is 0, use TRAPEZOIDAL; otherwise stay in S_CURVE
+        if (_profile.jerk == 0) {
+            _profile.type = VelocityProfileType::TRAPEZOIDAL;
+        }
+    } else {
+        // accel = 0: revert to CONSTANT (also reset jerk to prevent confusion)
+        _profile.type = VelocityProfileType::CONSTANT;
+        _profile.jerk = 0;
     }
+    
     if (_driver != nullptr) {
         _driver->setAccelerationProfile(_profile);
     }
+    
+    // Update LED to reflect profile change
+    statusLED.setAccelProfile(static_cast<AccelProfile>(_profile.type));
 }
 
 void MotorController::setJerk(float jerk) {
     _profile.jerk = jerk;
+    
+    // Update profile type based on jerk value
     if (jerk > 0) {
         _profile.type = VelocityProfileType::S_CURVE;
+    } else {
+        // jerk = 0: revert to TRAPEZOIDAL if accel > 0, otherwise CONSTANT
+        if (_profile.acceleration > 0) {
+            _profile.type = VelocityProfileType::TRAPEZOIDAL;
+        } else {
+            _profile.type = VelocityProfileType::CONSTANT;
+        }
     }
+    
     if (_driver != nullptr) {
         _driver->setAccelerationProfile(_profile);
     }
+    
+    // Update LED to reflect profile change
+    statusLED.setAccelProfile(static_cast<AccelProfile>(_profile.type));
 }
 
 void MotorController::enableMotor() {
@@ -413,11 +450,12 @@ void MotorController::printStatus() {
     Serial.print("    Max Speed:    ");
     Serial.print(_profile.maxSpeed);
     Serial.println(" steps/sec");
-    if (_profile.hasAcceleration()) {
-        Serial.print("    Acceleration: ");
-        Serial.print(_profile.acceleration);
-        Serial.println(" steps/sec²");
-    }
+    Serial.print("    Acceleration: ");
+    Serial.print(_profile.acceleration);
+    Serial.println(" steps/sec²");
+    Serial.print("    Jerk:         ");
+    Serial.print(_profile.jerk);
+    Serial.println(" steps/sec³");
     
     if (status.hasError()) {
         Serial.println("\n  ⚠ ERRORS:");
@@ -438,4 +476,19 @@ void MotorController::printStatus() {
 
 IMotorDriver* MotorController::getDriver() {
     return _driver;
+}
+
+bool MotorController::hasError() const {
+    // Critical errors that should trigger ERROR LED state
+    // Note: OPEN_LOAD is NOT included - motor may be intentionally disconnected
+    constexpr uint8_t criticalErrors = 
+        MotorError::OVER_TEMP | 
+        MotorError::SHORT_CIRCUIT | 
+        MotorError::COMM_FAILURE;
+    
+    return (_errorFlags & criticalErrors) != 0;
+}
+
+uint8_t MotorController::getErrorFlags() const {
+    return _errorFlags;
 }
