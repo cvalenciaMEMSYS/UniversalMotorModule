@@ -39,10 +39,26 @@ TMC2209Driver::TMC2209Driver(HardwareSerial* serial, uint8_t txPin, uint8_t rxPi
     , _currentSpeed(0)
     , _lastStepTime(0)
     , _stepInterval(1000)  // 1ms default
+    , _startPosition(0)
+    , _accelSteps(0)
+    , _decelSteps(0)
+    , _totalMoveSteps(0)
+    , _isTriangular(false)
+    , _moveDirection(1)
     , _stallThreshold(50) {
     
     // Initialize with default constant velocity profile
     _profile = AccelerationProfile::constant(_maxSpeed);
+    
+    // Initialize S-curve arrays
+    for (int i = 0; i < 7; i++) {
+        _scurveSegmentEnd[i] = 0;
+        _scurveAccel[i] = 0;
+        _jerkSign[i] = 0;
+    }
+    for (int i = 0; i < 8; i++) {
+        _scurveVelocity[i] = 0;
+    }
 }
 
 TMC2209Driver::~TMC2209Driver() {
@@ -152,18 +168,32 @@ bool TMC2209Driver::isEnabled() const {
 void TMC2209Driver::move(int32_t steps) {
     if (steps == 0) return;
     
-    // Calculate target
+    // Store move parameters
+    _startPosition = _position;
     _targetPosition = _position + steps;
+    _totalMoveSteps = abs(steps);
+    _moveDirection = steps > 0 ? 1 : -1;
     
-    // Set direction
+    // Set direction pin
     digitalWrite(_dirPin, steps > 0 ? HIGH : LOW);
+    
+    // Plan motion based on profile type
+    if (_profile.type == VelocityProfileType::CONSTANT) {
+        // No acceleration - fixed speed
+        _accelSteps = 0;
+        _decelSteps = 0;
+        _currentSpeed = _profile.maxSpeed;
+    } 
+    else if (_profile.type == VelocityProfileType::TRAPEZOIDAL) {
+        planTrapezoidalMotion();
+    }
+    else if (_profile.type == VelocityProfileType::S_CURVE) {
+        planSCurveMotion();
+    }
     
     _moving = true;
     calculateStepInterval();
     _lastStepTime = micros();
-    
-    // If constant velocity (no acceleration), we'll step at fixed rate
-    // For acceleration profiles, update() handles ramping
 }
 
 void TMC2209Driver::moveTo(int32_t position) {
@@ -208,7 +238,13 @@ void TMC2209Driver::update() {
         doStep();
         _lastStepTime = now;
         
-        // TODO: Update step interval for acceleration profiles
+        // Update speed based on profile type
+        if (_profile.type == VelocityProfileType::TRAPEZOIDAL) {
+            updateTrapezoidalSpeed();
+        } else if (_profile.type == VelocityProfileType::S_CURVE) {
+            updateSCurveSpeed();
+        }
+        // CONSTANT profile: speed stays fixed, no update needed
     }
 }
 
@@ -227,14 +263,249 @@ void TMC2209Driver::doStep() {
 }
 
 void TMC2209Driver::calculateStepInterval() {
-    // Convert speed (steps/sec) to interval (microseconds)
-    if (_maxSpeed > 0) {
-        _stepInterval = (uint32_t)(1000000.0f / _maxSpeed);
-        if (_stepInterval < 10) _stepInterval = 10;  // Minimum 10µs
-    } else {
-        _stepInterval = 1000;  // Default 1ms
+    // Convert current speed (steps/sec) to interval (microseconds)
+    float speed = _currentSpeed;
+    if (speed <= 0) speed = _maxSpeed;  // Fallback to max speed
+    if (speed <= 0) speed = 1;          // Safety
+    
+    _stepInterval = (uint32_t)(1000000.0f / speed);
+    if (_stepInterval < 10) _stepInterval = 10;  // Minimum 10µs (100kHz max)
+}
+
+// =============================================================================
+// MOTION PLANNING - TRAPEZOIDAL
+// =============================================================================
+
+void TMC2209Driver::planTrapezoidalMotion() {
+    float accel = _profile.acceleration;
+    float maxSpeed = _profile.maxSpeed;
+    
+    if (accel <= 0) {
+        // No acceleration configured - treat as constant
+        _accelSteps = 0;
+        _decelSteps = 0;
+        _currentSpeed = maxSpeed;
+        _isTriangular = false;
+        return;
     }
-    _currentSpeed = _maxSpeed;
+    
+    // Steps to reach max speed: v² = 2ad → d = v²/(2a)
+    int32_t stepsToMaxSpeed = (int32_t)((maxSpeed * maxSpeed) / (2.0f * accel));
+    
+    if (2 * stepsToMaxSpeed >= _totalMoveSteps) {
+        // Triangular profile - we never reach max speed
+        // Peak at halfway point
+        _isTriangular = true;
+        _accelSteps = _totalMoveSteps / 2;
+        _decelSteps = _totalMoveSteps - _accelSteps;
+    } else {
+        // Full trapezoidal - accel, cruise, decel
+        _isTriangular = false;
+        _accelSteps = stepsToMaxSpeed;
+        _decelSteps = stepsToMaxSpeed;
+    }
+    
+    // Start from minimum speed (not zero, to avoid division issues)
+    _currentSpeed = 50.0f;  // Minimum starting speed
+}
+
+void TMC2209Driver::updateTrapezoidalSpeed() {
+    // Calculate how many steps we've done and how many remain
+    int32_t stepsDone = abs(_position - _startPosition);
+    int32_t stepsRemaining = abs(_targetPosition - _position);
+    
+    float accel = _profile.acceleration;
+    float maxSpeed = _profile.maxSpeed;
+    
+    if (stepsDone < _accelSteps) {
+        // Accelerating phase
+        // v = sqrt(2 * a * d) where d = steps done + 1 (look ahead)
+        _currentSpeed = sqrtf(2.0f * accel * (float)(stepsDone + 1));
+        _currentSpeed = min(_currentSpeed, maxSpeed);
+    } 
+    else if (stepsRemaining <= _decelSteps) {
+        // Decelerating phase  
+        // v = sqrt(2 * a * d) where d = steps remaining
+        _currentSpeed = sqrtf(2.0f * accel * (float)stepsRemaining);
+    }
+    else {
+        // Cruising at max speed
+        _currentSpeed = maxSpeed;
+    }
+    
+    // Enforce minimum speed to prevent stalling
+    if (_currentSpeed < 50.0f) _currentSpeed = 50.0f;
+    
+    // Update step interval based on new speed
+    calculateStepInterval();
+}
+
+// =============================================================================
+// MOTION PLANNING - S-CURVE (7-segment)
+// =============================================================================
+
+void TMC2209Driver::planSCurveMotion() {
+    // 7-segment S-curve profile:
+    // Seg 0: Jerk+ (acceleration increasing from 0)
+    // Seg 1: Constant acceleration (at max accel)
+    // Seg 2: Jerk- (acceleration decreasing to 0, reaching max velocity)
+    // Seg 3: Cruise (constant velocity)
+    // Seg 4: Jerk- (acceleration decreasing, starting decel)
+    // Seg 5: Constant deceleration (at max decel)
+    // Seg 6: Jerk+ (acceleration increasing back to 0, stopping)
+    
+    float jerk = _profile.jerk;
+    float maxAccel = _profile.acceleration;
+    float maxSpeed = _profile.maxSpeed;
+    
+    if (jerk <= 0 || maxAccel <= 0) {
+        // Fall back to trapezoidal if jerk not configured
+        planTrapezoidalMotion();
+        return;
+    }
+    
+    // Time to reach max acceleration with given jerk: t_j = a_max / j
+    float t_j = maxAccel / jerk;
+    
+    // Distance covered during one jerk phase: d = j * t³ / 6
+    float jerkPhaseDist = jerk * t_j * t_j * t_j / 6.0f;
+    
+    // Velocity gained during one jerk phase: v = j * t² / 2
+    float jerkPhaseVel = jerk * t_j * t_j / 2.0f;
+    
+    // Velocity gained during constant accel phase to reach max speed
+    // Total velocity from accel side: 2 * jerkPhaseVel + v_const_accel = maxSpeed
+    float constAccelVel = maxSpeed - 2.0f * jerkPhaseVel;
+    
+    float constAccelDist = 0;
+    float t_a = 0;
+    
+    if (constAccelVel > 0) {
+        // We have a constant acceleration phase
+        // Time at constant accel: t_a = v / a
+        t_a = constAccelVel / maxAccel;
+        // Distance: d = v0*t + 0.5*a*t² where v0 = jerkPhaseVel
+        constAccelDist = jerkPhaseVel * t_a + 0.5f * maxAccel * t_a * t_a;
+    } else {
+        // Max speed is low - we never reach max accel
+        // Simplified: use triangular jerk profile
+        constAccelVel = 0;
+        constAccelDist = 0;
+    }
+    
+    // Total distance for acceleration side (3 segments)
+    // Seg 0 + Seg 1 + Seg 2 (Seg 2 starts at jerkPhaseVel + constAccelVel, ends at maxSpeed)
+    float accelSideDist = jerkPhaseDist + constAccelDist + jerkPhaseDist + 
+                          (jerkPhaseVel + constAccelVel) * t_j;  // Extra distance in Seg 2
+    
+    // Deceleration side is symmetric
+    float decelSideDist = accelSideDist;
+    
+    // Check if we have room for cruise phase
+    float totalAccelDecelDist = accelSideDist + decelSideDist;
+    float cruiseDist = (float)_totalMoveSteps - totalAccelDecelDist;
+    
+    if (cruiseDist < 0) {
+        // Not enough room for full S-curve - fall back to trapezoidal
+        // (A proper implementation would scale down the profile)
+        planTrapezoidalMotion();
+        return;
+    }
+    
+    // Calculate segment end positions (cumulative steps from start)
+    // All distances are now in steps
+    int32_t pos = 0;
+    
+    // Segment 0: Jerk+ phase
+    _scurveSegmentEnd[0] = pos + (int32_t)jerkPhaseDist;
+    _scurveVelocity[0] = 50.0f;  // Start speed
+    _scurveVelocity[1] = jerkPhaseVel;
+    _scurveAccel[0] = 0;  // Accel starts at 0
+    _jerkSign[0] = 1;     // Positive jerk
+    pos = _scurveSegmentEnd[0];
+    
+    // Segment 1: Constant acceleration
+    _scurveSegmentEnd[1] = pos + (int32_t)constAccelDist;
+    _scurveVelocity[2] = jerkPhaseVel + constAccelVel;
+    _scurveAccel[1] = maxAccel;
+    _jerkSign[1] = 0;     // No jerk change
+    pos = _scurveSegmentEnd[1];
+    
+    // Segment 2: Jerk- phase (approaching cruise)
+    _scurveSegmentEnd[2] = pos + (int32_t)(jerkPhaseDist + (jerkPhaseVel + constAccelVel) * t_j);
+    _scurveVelocity[3] = maxSpeed;
+    _scurveAccel[2] = maxAccel;  // Starts at max, decreases
+    _jerkSign[2] = -1;    // Negative jerk
+    pos = _scurveSegmentEnd[2];
+    
+    // Segment 3: Cruise
+    _scurveSegmentEnd[3] = pos + (int32_t)cruiseDist;
+    _scurveVelocity[4] = maxSpeed;
+    _scurveAccel[3] = 0;
+    _jerkSign[3] = 0;
+    pos = _scurveSegmentEnd[3];
+    
+    // Segment 4: Jerk- phase (starting decel)
+    _scurveSegmentEnd[4] = pos + (int32_t)(jerkPhaseDist + maxSpeed * t_j - jerkPhaseVel * t_j);
+    _scurveVelocity[5] = maxSpeed - jerkPhaseVel;
+    _scurveAccel[4] = 0;  // Starts at 0, goes negative
+    _jerkSign[4] = -1;
+    pos = _scurveSegmentEnd[4];
+    
+    // Segment 5: Constant deceleration
+    _scurveSegmentEnd[5] = pos + (int32_t)constAccelDist;
+    _scurveVelocity[6] = jerkPhaseVel;
+    _scurveAccel[5] = -maxAccel;
+    _jerkSign[5] = 0;
+    pos = _scurveSegmentEnd[5];
+    
+    // Segment 6: Jerk+ phase (stopping)
+    _scurveSegmentEnd[6] = _totalMoveSteps;
+    _scurveVelocity[7] = 50.0f;  // End speed
+    _scurveAccel[6] = -maxAccel;  // Starts at -max, goes to 0
+    _jerkSign[6] = 1;
+    
+    _currentSpeed = 50.0f;  // Start at minimum speed
+    _isTriangular = false;
+}
+
+void TMC2209Driver::updateSCurveSpeed() {
+    int32_t stepsDone = abs(_position - _startPosition);
+    
+    // Find which segment we're in
+    int segment = 0;
+    for (int i = 0; i < 7; i++) {
+        if (stepsDone < _scurveSegmentEnd[i]) {
+            segment = i;
+            break;
+        }
+        if (i == 6) segment = 6;  // In last segment
+    }
+    
+    // Calculate position within segment
+    int32_t segmentStart = (segment == 0) ? 0 : _scurveSegmentEnd[segment - 1];
+    int32_t stepsInSegment = stepsDone - segmentStart;
+    int32_t segmentLength = _scurveSegmentEnd[segment] - segmentStart;
+    
+    if (segmentLength <= 0) {
+        _currentSpeed = _scurveVelocity[segment];
+        calculateStepInterval();
+        return;
+    }
+    
+    // Linear interpolation within segment (simplified)
+    // A more accurate implementation would use proper kinematic equations
+    float progress = (float)stepsInSegment / (float)segmentLength;
+    float v0 = _scurveVelocity[segment];
+    float v1 = _scurveVelocity[segment + 1];
+    
+    _currentSpeed = v0 + (v1 - v0) * progress;
+    
+    // Enforce minimum speed
+    if (_currentSpeed < 50.0f) _currentSpeed = 50.0f;
+    if (_currentSpeed > _profile.maxSpeed) _currentSpeed = _profile.maxSpeed;
+    
+    calculateStepInterval();
 }
 
 // =============================================================================

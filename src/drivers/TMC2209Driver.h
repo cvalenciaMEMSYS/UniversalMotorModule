@@ -165,6 +165,21 @@ private:
     uint32_t _lastStepTime;
     uint32_t _stepInterval;  // microseconds between steps
     
+    // Trapezoidal/S-Curve motion planning
+    int32_t _startPosition;      // Position when move started
+    int32_t _accelSteps;         // Steps in acceleration phase
+    int32_t _decelSteps;         // Steps in deceleration phase
+    int32_t _totalMoveSteps;     // Total steps in current move
+    bool _isTriangular;          // True if no cruise phase (accel → decel)
+    int8_t _moveDirection;       // +1 or -1
+    
+    // S-Curve specific: 7 segment positions (cumulative step counts from start)
+    // Segments: J+(0), ConstA(1), J-(2), Cruise(3), J-(4), ConstD(5), J+(6), End
+    int32_t _scurveSegmentEnd[7];  // Step position where each segment ends
+    float _scurveVelocity[8];      // Velocity at each segment boundary
+    float _scurveAccel[7];         // Acceleration at start of each segment
+    float _jerkSign[7];            // Jerk sign for each segment (0, +j, or -j)
+    
     // StallGuard
     uint8_t _stallThreshold;
     
@@ -174,4 +189,10 @@ private:
     void calculateStepInterval();
     uint8_t microStepsToMRES(uint16_t ms);
     uint16_t mrestoMicrosteps(uint8_t mres);
+    
+    // Motion planning
+    void planTrapezoidalMotion();
+    void planSCurveMotion();
+    void updateTrapezoidalSpeed();
+    void updateSCurveSpeed();
 };
