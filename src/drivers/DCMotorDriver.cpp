@@ -13,6 +13,7 @@
  */
 
 #include "DCMotorDriver.h"
+#include "../core/MotionMath.h"
 
 // =============================================================================
 // CONSTRUCTORS
@@ -440,8 +441,7 @@ float DCMotorDriver::computeSCurveSpeed(uint32_t elapsedMs) {
             float t_j = seg2Duration / 1000.0f;
             v1 = _scurvePeakSpeed - _scurveJerk * t_j * t_j / 2.0f;
             if (v1 < 0) v1 = 0;
-            float smoothProgress = progress * progress * (3.0f - 2.0f * progress);
-            speed = v0 + (v1 - v0) * smoothProgress;
+            speed = v0 + (v1 - v0) * MotionMath::smoothSCurveProgress(progress);
             break;
         }
             

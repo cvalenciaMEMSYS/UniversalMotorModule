@@ -15,6 +15,7 @@
  */
 
 #include "TMC2208Driver.h"
+#include "../core/MotionMath.h"
 
 // =============================================================================
 // CONSTRUCTORS
@@ -291,8 +292,7 @@ void TMC2208Driver::calculateStepInterval() {
     if (speed <= 0) speed = _maxSpeed;
     if (speed <= 0) speed = 1;
     
-    _stepInterval = (uint32_t)(1000000.0f / speed);
-    if (_stepInterval < 10) _stepInterval = 10;
+    _stepInterval = MotionMath::calculateStepInterval(speed);
 }
 
 // =============================================================================
@@ -311,14 +311,13 @@ void TMC2208Driver::planTrapezoidalMotion() {
         return;
     }
     
-    int32_t stepsToMaxSpeed = (int32_t)((maxSpeed * maxSpeed) / (2.0f * accel));
+    int32_t stepsToMaxSpeed = MotionMath::calculateStepsToMaxSpeed(maxSpeed, accel);
+    _isTriangular = MotionMath::isTriangularProfile(_totalMoveSteps, maxSpeed, accel);
     
-    if (2 * stepsToMaxSpeed >= _totalMoveSteps) {
-        _isTriangular = true;
+    if (_isTriangular) {
         _accelSteps = _totalMoveSteps / 2;
         _decelSteps = _totalMoveSteps - _accelSteps;
     } else {
-        _isTriangular = false;
         _accelSteps = stepsToMaxSpeed;
         _decelSteps = stepsToMaxSpeed;
     }
@@ -330,21 +329,15 @@ void TMC2208Driver::updateTrapezoidalSpeed() {
     int32_t stepsDone = abs(_position - _startPosition);
     int32_t stepsRemaining = abs(_targetPosition - _position);
     
-    float accel = _profile.acceleration;
-    float maxSpeed = _profile.maxSpeed;
-    
-    if (stepsDone < _accelSteps) {
-        _currentSpeed = sqrtf(2.0f * accel * (float)(stepsDone + 1));
-        _currentSpeed = min(_currentSpeed, maxSpeed);
-    } 
-    else if (stepsRemaining <= _decelSteps) {
-        _currentSpeed = sqrtf(2.0f * accel * (float)stepsRemaining);
-    }
-    else {
-        _currentSpeed = maxSpeed;
-    }
-    
-    if (_currentSpeed < 50.0f) _currentSpeed = 50.0f;
+    _currentSpeed = MotionMath::calculateTrapezoidalVelocity(
+        stepsDone,
+        stepsRemaining,
+        _accelSteps,
+        _decelSteps,
+        _profile.acceleration,
+        _profile.maxSpeed,
+        50.0f  // minSpeed
+    );
     
     calculateStepInterval();
 }
@@ -374,13 +367,13 @@ void TMC2208Driver::planSCurveMotion() {
     }
     
     // Time to reach max acceleration with given jerk: t_j = a_max / j
-    float t_j = maxAccel / jerk;
+    float t_j = MotionMath::calculateJerkPhaseTime(maxAccel, jerk);
     
     // Distance covered during one jerk phase: s = j * t³ / 6
-    float jerkPhaseDist = jerk * t_j * t_j * t_j / 6.0f;
+    float jerkPhaseDist = MotionMath::calculateJerkPhaseDistance(jerk, t_j);
     
     // Velocity gained during one jerk phase: v = j * t² / 2  
-    float jerkPhaseVel = jerk * t_j * t_j / 2.0f;
+    float jerkPhaseVel = MotionMath::calculateJerkPhaseVelocity(jerk, t_j);
     
     // Velocity gained during constant accel phase to reach max speed
     float constAccelVel = maxSpeed - minSpeed - 2.0f * jerkPhaseVel;
@@ -405,7 +398,7 @@ void TMC2208Driver::planSCurveMotion() {
         }
         jerkPhaseVel = velocityBudget / 2.0f;
         t_j = sqrtf(2.0f * jerkPhaseVel / jerk);
-        jerkPhaseDist = jerk * t_j * t_j * t_j / 6.0f;
+        jerkPhaseDist = MotionMath::calculateJerkPhaseDistance(jerk, t_j);
         constAccelVel = 0;
         constAccelDist = 0;
     }
@@ -527,17 +520,11 @@ void TMC2208Driver::updateSCurveSpeed() {
     if (j != 0) {
         // Jerk phase: use smooth S-curve interpolation
         float progress = (float)stepsInSegment / (float)segmentLength;
-        float smoothProgress = progress * progress * (3.0f - 2.0f * progress);
-        _currentSpeed = v0 + (v1 - v0) * smoothProgress;
+        _currentSpeed = MotionMath::interpolateJerkPhaseVelocity(v0, v1, progress);
     }
     else if (a0 != 0) {
         // Constant acceleration phase: v² = v0² + 2*a*s
-        float v_squared = v0 * v0 + 2.0f * a0 * (float)stepsInSegment;
-        if (v_squared > 0) {
-            _currentSpeed = sqrtf(v_squared);
-        } else {
-            _currentSpeed = v0;
-        }
+        _currentSpeed = MotionMath::calculateConstantAccelVelocity(v0, a0, (float)stepsInSegment);
     }
     else {
         // Cruise phase: constant velocity
@@ -630,33 +617,11 @@ void TMC2208Driver::setStepDirMode(bool enabled) {
 }
 
 uint8_t TMC2208Driver::microStepsToMRES(uint16_t ms) {
-    switch (ms) {
-        case 256: return 0;
-        case 128: return 1;
-        case 64:  return 2;
-        case 32:  return 3;
-        case 16:  return 4;
-        case 8:   return 5;
-        case 4:   return 6;
-        case 2:   return 7;
-        case 1:   return 8;  // Full step
-        default:  return 4;  // Default to 16
-    }
+    return MotionMath::microStepsToMRES(ms);
 }
 
 uint16_t TMC2208Driver::mrestoMicrosteps(uint8_t mres) {
-    switch (mres) {
-        case 0: return 256;
-        case 1: return 128;
-        case 2: return 64;
-        case 3: return 32;
-        case 4: return 16;
-        case 5: return 8;
-        case 6: return 4;
-        case 7: return 2;
-        case 8: return 1;
-        default: return 16;
-    }
+    return MotionMath::mresToMicrosteps(mres);
 }
 
 // =============================================================================
