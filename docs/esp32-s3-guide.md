@@ -4,6 +4,71 @@ Deep dive into the ESP32-S3 microcontroller capabilities for stepper motor contr
 
 ---
 
+## 🎯 System Architecture
+
+### Universal Motor Module Overview
+
+This ESP32-S3 firmware provides a unified motor control platform supporting multiple driver types through a common interface.
+
+```
+    ┌────────────────────────────────────────────────────────────┐
+    │                    ESP32-S3 Super Mini                     │
+    ├────────────────────────────────────────────────────────────┤
+    │  ┌──────────────┐    ┌──────────────┐   ┌──────────────┐  │
+    │  │ Serial (USB) │───▶│ Command      │──▶│ IMotorDriver │  │
+    │  │ Console      │    │ Parser       │   │ Interface    │  │
+    │  └──────────────┘    └──────────────┘   └──────┬───────┘  │
+    │                                                 │          │
+    │  ┌──────────────────────────────────────────────┼────────┐│
+    │  │                 Driver Implementations       ▼        ││
+    │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐     ││
+    │  │  │ TMC2209     │ │ TMC2208     │ │ DCMotor     │     ││
+    │  │  │ Driver      │ │ Driver      │ │ Driver      │     ││
+    │  │  │ (UART+S/D)  │ │ (UART+S/D)  │ │ (H-Bridge)  │     ││
+    │  │  └──────┬──────┘ └──────┬──────┘ └──────┬──────┘     ││
+    │  └─────────┼───────────────┼───────────────┼────────────┘│
+    │            │               │               │              │
+    └────────────┼───────────────┼───────────────┼──────────────┘
+                 ▼               ▼               ▼
+         ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+         │  TMC2209     │ │  TMC2208     │ │  H-Bridge    │
+         │  Stepper     │ │  Stepper     │ │  DC Motor    │
+         │  Driver IC   │ │  Driver IC   │ │  (RZ7899)    │
+         └──────────────┘ └──────────────┘ └──────────────┘
+```
+
+### Auto-Detection System
+
+The module automatically detects connected hardware using GPIO jumpers:
+
+| GPIO 11 | GPIO 12 | Detected Driver |
+|---------|---------|-----------------|
+| LOW | LOW | TMC2209 (default) |
+| LOW | HIGH | TMC2208 |
+| HIGH | LOW | DC Motor |
+| HIGH | HIGH | Reserved |
+
+GPIO 10 and GPIO 13 provide VCC for jumper connections.
+
+### Command Flow
+
+1. User sends command via USB Serial (e.g., `move 1000`)
+2. Parser in `main.cpp` identifies command type
+3. Appropriate `IMotorDriver` method is called
+4. Driver translates to hardware actions (Step/Dir pulses or PWM)
+5. `driver->update()` called each loop iteration for motion control
+6. Response sent back via Serial
+
+### Key Features
+
+- **Unified Interface**: Same commands work for all motor types
+- **UART Control**: TMC steppers configured via single-wire UART
+- **Step/Dir Fallback**: Works even if UART communication fails
+- **Acceleration Profiles**: Constant, Trapezoidal, or S-Curve motion
+- **Real-time Control**: Non-blocking motion with microsecond step timing
+
+---
+
 ## 🔧 Hardware Overview
 
 ### ESP32-S3 Super Mini Specifications

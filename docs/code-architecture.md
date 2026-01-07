@@ -9,20 +9,170 @@ Complete technical documentation of the Universal Motor Module firmware architec
 ```
 UniversalMotorModule/
 ├── src/
-│   └── main.cpp              # Main firmware (all code in one file)
-├── include/                  # Header files (none currently)
-├── lib/                      # Custom libraries (none currently)
-├── platformio.ini            # Build configuration
-├── Quick_Wiring_Guide.md     # Hardware setup
-└── docs/                     # Technical documentation
-    ├── code-architecture.md  # This file
-    ├── esp32-s3-guide.md     # ESP32-S3 capabilities
-    └── tmc2209-guide.md      # TMC2209 driver features
+│   ├── main.cpp                  # Entry point, command parser, main loop
+│   ├── config/
+│   │   └── PinConfig.h           # Hardware pin definitions
+│   └── drivers/
+│       ├── IMotorDriver.h        # Abstract interface for all motors
+│       ├── DriverFactory.cpp     # Auto-detection and driver creation
+│       ├── TMC2209Driver.h/.cpp  # TMC2209 UART + Step/Dir driver
+│       ├── TMC2208Driver.h/.cpp  # TMC2208 UART + Step/Dir driver
+│       └── DCMotorDriver.h/.cpp  # H-Bridge DC motor driver
+├── include/                      # (unused - headers in src/)
+├── lib/                          # Custom libraries (none currently)
+├── platformio.ini                # Build configuration
+├── Quick_Wiring_Guide.md         # Hardware setup
+└── docs/
+    ├── code-architecture.md      # This file
+    ├── motor-drivers.md          # Driver feature comparison
+    ├── esp32-s3-guide.md         # ESP32-S3 capabilities
+    └── tmc2209-guide.md          # TMC2209 driver features
 ```
 
 ---
 
-## 🏗️ Code Architecture Overview
+## 🎯 System Architecture Overview
+
+### High-Level Flow
+
+```
+┌─────────────┐      ┌──────────────┐      ┌───────────────────┐
+│   main.cpp  │      │DriverFactory │      │  IMotorDriver     │
+│  (Entry)    │ ──→  │(Auto-Detect) │ ──→  │  (Interface)      │
+└─────────────┘      └──────────────┘      └───────────────────┘
+       │                    │                        │
+       │              ┌─────┴─────┐                  │
+       │              ▼           ▼                  │
+       │         GPIO 11/12    Detection             │
+       │         Jumpers       Logic                 │
+       │                                             │
+       ▼                                             ▼
+┌─────────────┐                            ┌───────────────────┐
+│Serial Parser│                            │ Driver Impl.      │
+│ (Commands)  │ ─────────────────────────→ │ • TMC2209Driver   │
+│             │                            │ • TMC2208Driver   │
+└─────────────┘                            │ • DCMotorDriver   │
+       │                                   └───────────────────┘
+       ▼                                             │
+┌─────────────┐                                      ▼
+│  Response   │                            ┌───────────────────┐
+│  to User    │ ←─────────────────────────│  Motor Hardware   │
+└─────────────┘                            └───────────────────┘
+```
+
+### Execution Flow
+
+1. **Boot**: `setup()` in main.cpp initializes Serial, GPIO, RGB LED
+2. **Auto-Detection**: `DriverFactory::detectAndCreate()` reads GPIO 11/12 to determine motor type
+3. **Driver Init**: Selected driver's `init()` configures hardware (UART, pins, etc.)
+4. **Main Loop**: `loop()` processes Serial commands and calls `driver->update()`
+5. **Commands**: Parser in main.cpp routes commands to `IMotorDriver` methods
+
+### Component Responsibilities
+
+| Component | Responsibility |
+|-----------|---------------|
+| **main.cpp** | Command parsing, Serial I/O, main loop, LED feedback |
+| **PinConfig.h** | Hardware pin definitions, default motor config |
+| **IMotorDriver.h** | Abstract interface defining motor driver API |
+| **DriverFactory** | Auto-detection logic, driver instantiation |
+| **TMC2209Driver** | UART + StallGuard + Step/Dir stepper control |
+| **TMC2208Driver** | UART + Step/Dir stepper control (no StallGuard) |
+| **DCMotorDriver** | H-Bridge PWM DC motor control |
+
+---
+
+## 🔌 Driver Interface (IMotorDriver)
+
+All motor drivers implement this common interface:
+
+```cpp
+class IMotorDriver {
+public:
+    // Lifecycle
+    virtual bool init() = 0;
+    virtual MotorType getType() const = 0;
+    virtual const char* getName() const = 0;
+    
+    // Enable/Disable
+    virtual void enable() = 0;
+    virtual void disable() = 0;
+    virtual bool isEnabled() const = 0;
+    
+    // Motion Control
+    virtual void move(int32_t steps) = 0;      // Relative move
+    virtual void moveTo(int32_t position) = 0; // Absolute move
+    virtual void stop() = 0;                   // Controlled stop
+    virtual void emergencyStop() = 0;          // Immediate stop
+    virtual bool isMoving() const = 0;
+    virtual void update() = 0;                 // Called in loop()
+    
+    // Configuration
+    virtual void setMaxSpeed(float speed) = 0;
+    virtual void setCurrent(uint16_t runMA, uint16_t holdMA = 0) = 0;
+    virtual void setMicrosteps(uint16_t ms) = 0;
+    virtual void setAccelerationProfile(const AccelerationProfile& p) = 0;
+    
+    // Position
+    virtual int32_t getPosition() const = 0;
+    virtual void setPosition(int32_t pos) = 0;
+    virtual void home(int8_t direction = -1) = 0;
+    
+    // Diagnostics
+    virtual MotorStatus getStatus() = 0;
+    virtual bool isStalling() = 0;
+    virtual void printDiagnostics() = 0;
+    virtual bool testConnection() = 0;
+};
+```
+
+### Acceleration Profiles
+
+Three profile types are supported:
+
+```cpp
+enum class VelocityProfileType {
+    CONSTANT,      // Instant speed changes
+    TRAPEZOIDAL,   // Linear accel/decel ramps
+    S_CURVE        // Jerk-limited 7-segment motion
+};
+
+struct AccelerationProfile {
+    VelocityProfileType type;
+    float maxSpeed;       // steps/sec or %
+    float acceleration;   // steps/sec² or %/sec
+    float jerk;          // steps/sec³ (S-curve only)
+};
+```
+
+---
+
+## 🔄 UART Fallback Mode
+
+Both TMC2209 and TMC2208 drivers support **Step/Dir fallback mode** when UART communication fails.
+
+### Fallback Trigger
+- UART test fails during `init()`
+- User sends `stepdir on` command
+
+### Step/Dir Mode Behavior
+| Feature | UART Mode | Step/Dir Mode |
+|---------|-----------|---------------|
+| Current Setting | Via UART register | Vref potentiometer (hardware) |
+| Microstepping | Via UART register | MS1/MS2 pins (hardware) |
+| StallGuard (TMC2209) | ✅ Available | ❌ Not available |
+| Homing | Sensorless (TMC2209) | Limit switches required |
+| Diagnostics | Full register readout | Basic status only |
+
+### Commands
+```
+stepdir on         # Switch to Step/Dir only mode
+stepdir off        # Try to re-enable UART
+```
+
+---
+
+## 🏗️ Original Code Architecture
 
 ### Design Pattern: Monolithic Arduino-style
 

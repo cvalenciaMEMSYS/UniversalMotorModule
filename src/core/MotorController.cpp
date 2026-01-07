@@ -7,6 +7,8 @@
 #include "MotorController.h"
 #include "../config/PinConfig.h"
 #include "StatusLED.h"
+#include "../drivers/TMC2209Driver.h"
+#include "../drivers/TMC2208Driver.h"
 
 // =============================================================================
 // CONSTRUCTOR / DESTRUCTOR
@@ -178,22 +180,59 @@ void MotorController::processCommand(const String& cmd) {
         _driver->printDiagnostics();
     }
     else if (command == "scan") {
-        // Scan for drivers (TMC2209 specific)
-        // Cast to TMC2209Driver if applicable
+        // Scan for TMC2209 drivers at all 4 addresses
         if (_driver->getType() == MotorType::STEPPER_TMC2209) {
-            // Ideally we'd have a way to access TMC-specific methods
-            // For now, just note this
-            Serial.println("Address scanning available via TMC2209Driver");
+            auto* tmc = static_cast<TMC2209Driver*>(_driver);
+            tmc->scanAddresses();
+        } else {
+            Serial.println("Scan command only available for TMC2209 driver");
         }
     }
     else if (command == "reconfigure" || command == "reconfig") {
         // Reconfigure driver (useful after power glitch)
-        if (_driver->getType() == MotorType::STEPPER_TMC2209) {
+        MotorType type = _driver->getType();
+        if (type == MotorType::STEPPER_TMC2209) {
             Serial.println("Reconfiguring TMC2209...");
-            // Access TMC-specific reconfigure via init
-            _driver->init();
+            auto* tmc = static_cast<TMC2209Driver*>(_driver);
+            tmc->reconfigure();
+        } else if (type == MotorType::STEPPER_TMC2208) {
+            Serial.println("Reconfiguring TMC2208...");
+            auto* tmc = static_cast<TMC2208Driver*>(_driver);
+            tmc->reconfigure();
         } else {
             Serial.println("Reconfigure not needed for this driver");
+        }
+    }
+    else if (command.startsWith("stepdir ")) {
+        // Step/Dir fallback mode toggle (TMC drivers only)
+        String mode = command.substring(8);
+        mode.trim();
+        
+        MotorType type = _driver->getType();
+        if (type == MotorType::STEPPER_TMC2209) {
+            // Cast to TMC2209Driver to access setStepDirMode
+            auto* tmc = static_cast<TMC2209Driver*>(_driver);
+            if (mode == "on") {
+                tmc->setStepDirMode(true);
+            } else if (mode == "off") {
+                tmc->setStepDirMode(false);
+            } else {
+                Serial.println("Usage: stepdir on|off");
+            }
+        }
+        else if (type == MotorType::STEPPER_TMC2208) {
+            // Cast to TMC2208Driver to access setStepDirMode
+            auto* tmc = static_cast<TMC2208Driver*>(_driver);
+            if (mode == "on") {
+                tmc->setStepDirMode(true);
+            } else if (mode == "off") {
+                tmc->setStepDirMode(false);
+            } else {
+                Serial.println("Usage: stepdir on|off");
+            }
+        }
+        else {
+            Serial.println("stepdir command only applies to TMC2209/TMC2208 drivers");
         }
     }
     
@@ -268,7 +307,7 @@ void MotorController::printHelp() {
     Serial.println("│  Motion:                                                    │");
     Serial.println("│    move <steps>      Relative move (+ or -)                 │");
     Serial.println("│    abs <position>    Move to absolute position (>= 0)       │");
-    Serial.println("│    home              Find home position                     │");
+    Serial.println("│    home              Find home position (TMC2209 only)      │");
     Serial.println("│    stop              Emergency stop                         │");
     Serial.println("│                                                             │");
     Serial.println("│  Control:                                                   │");
@@ -277,16 +316,20 @@ void MotorController::printHelp() {
     Serial.println("│                                                             │");
     Serial.println("│  Configuration:                                             │");
     Serial.println("│    set speed <val>   Set max speed (steps/sec)              │");
-    Serial.println("│    set current <mA>  Set motor current                      │");
-    Serial.println("│    set microsteps <n> Set microstepping (1-256)             │");
+    Serial.println("│    set current <mA>  Set motor current (UART mode only)     │");
+    Serial.println("│    set microsteps <n> Set microstepping (1-256, UART only)  │");
     Serial.println("│    set accel <val>   Set acceleration (steps/sec²)          │");
     Serial.println("│    set jerk <val>    Set jerk for S-curve (steps/sec³)      │");
+    Serial.println("│                                                             │");
+    Serial.println("│  UART Control (TMC2209/TMC2208):                            │");
+    Serial.println("│    stepdir on        Switch to Step/Dir fallback mode       │");
+    Serial.println("│    stepdir off       Re-enable UART mode                    │");
+    Serial.println("│    reconfigure       Re-apply UART settings                 │");
     Serial.println("│                                                             │");
     Serial.println("│  Status/Debug:                                              │");
     Serial.println("│    ? or status       Show current status                    │");
     Serial.println("│    t or test         Test driver connection                 │");
     Serial.println("│    r or diag         Full diagnostics                       │");
-    Serial.println("│    reconfigure       Re-apply settings (after power glitch) │");
     Serial.println("│    help              Show this help                         │");
     Serial.println("└─────────────────────────────────────────────────────────────┘\n");
 }

@@ -9,8 +9,8 @@
 
 // Include driver implementations
 #include "TMC2209Driver.h"
-// #include "TMC2208Driver.h"  // Uncomment when implemented
-// #include "DCMotorDriver.h"  // Uncomment when implemented
+#include "TMC2208Driver.h"
+#include "DCMotorDriver.h"
 
 // Static member initialization
 bool DriverFactory::_detectionInitialized = false;
@@ -61,16 +61,10 @@ IMotorDriver* DriverFactory::createDriver(MotorType type) {
             return new TMC2209Driver();
             
         case MotorType::STEPPER_TMC2208:
-            // TODO: Implement TMC2208Driver
-            Serial.println("WARNING: TMC2208 driver not yet implemented!");
-            // return new TMC2208Driver();
-            return nullptr;
+            return new TMC2208Driver();
             
         case MotorType::DC_MOTOR:
-            // TODO: Implement DCMotorDriver
-            Serial.println("WARNING: DC Motor driver not yet implemented!");
-            // return new DCMotorDriver();
-            return nullptr;
+            return new DCMotorDriver();
             
         case MotorType::UNKNOWN:
         default:

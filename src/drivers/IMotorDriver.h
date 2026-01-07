@@ -37,7 +37,7 @@ inline const char* motorTypeToString(MotorType type) {
         case MotorType::STEPPER_TMC2209: return "TMC2209";
         case MotorType::STEPPER_TMC2208: return "TMC2208";
         case MotorType::DC_MOTOR:        return "DC Motor";
-        default:                          return "Unknown";
+        default:                         return "Unknown";
     }
 }
 

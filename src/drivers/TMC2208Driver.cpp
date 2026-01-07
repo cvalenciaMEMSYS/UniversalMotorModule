@@ -1,31 +1,40 @@
 /*
  * =============================================================================
- * TMC2209 DRIVER - Implementation
+ * TMC2208 DRIVER - Implementation
+ * =============================================================================
+ * 
+ * UART-controlled stepper driver with Step/Dir fallback mode.
+ * Uses TMCStepper library (TMC2208Stepper class).
+ * 
+ * Key differences from TMC2209:
+ *   - NO StallGuard (sensorless homing not available)
+ *   - NO CoolStep (automatic current reduction)
+ *   - Same UART configuration for current, microstepping, StealthChop
+ * 
  * =============================================================================
  */
 
-#include "TMC2209Driver.h"
+#include "TMC2208Driver.h"
 
 // =============================================================================
-// CONSTRUCTOR / DESTRUCTOR
+// CONSTRUCTORS
 // =============================================================================
 
-TMC2209Driver::TMC2209Driver()
-    : TMC2209Driver(&Serial1, TMC_TX_PIN, TMC_RX_PIN, 
+TMC2208Driver::TMC2208Driver()
+    : TMC2208Driver(&Serial1, TMC_TX_PIN, TMC_RX_PIN,
                     TMC_EN_PIN, TMC_STEP_PIN, TMC_DIR_PIN,
-                    TMC_DRIVER_ADDR, TMC_R_SENSE) {
+                    TMC_R_SENSE) {
 }
 
-TMC2209Driver::TMC2209Driver(HardwareSerial* serial, uint8_t txPin, uint8_t rxPin,
+TMC2208Driver::TMC2208Driver(HardwareSerial* serial, uint8_t txPin, uint8_t rxPin,
                              uint8_t enPin, uint8_t stepPin, uint8_t dirPin,
-                             uint8_t address, float rSense)
+                             float rSense)
     : _serial(serial)
     , _txPin(txPin)
     , _rxPin(rxPin)
     , _enPin(enPin)
     , _stepPin(stepPin)
     , _dirPin(dirPin)
-    , _address(address)
     , _rSense(rSense)
     , _driver(nullptr)
     , _uartMode(true)  // Start assuming UART will work
@@ -39,14 +48,13 @@ TMC2209Driver::TMC2209Driver(HardwareSerial* serial, uint8_t txPin, uint8_t rxPi
     , _maxSpeed(DefaultMotorConfig::STEPPER_MAX_SPEED)
     , _currentSpeed(0)
     , _lastStepTime(0)
-    , _stepInterval(1000)  // 1ms default
+    , _stepInterval(1000)
     , _startPosition(0)
     , _accelSteps(0)
     , _decelSteps(0)
     , _totalMoveSteps(0)
     , _isTriangular(false)
-    , _moveDirection(1)
-    , _stallThreshold(50) {
+    , _moveDirection(1) {
     
     // Initialize with default constant velocity profile
     _profile = AccelerationProfile::constant(_maxSpeed);
@@ -62,30 +70,35 @@ TMC2209Driver::TMC2209Driver(HardwareSerial* serial, uint8_t txPin, uint8_t rxPi
     }
 }
 
-TMC2209Driver::~TMC2209Driver() {
+TMC2208Driver::~TMC2208Driver() {
     if (_driver != nullptr) {
         delete _driver;
         _driver = nullptr;
     }
+    disable();
 }
 
 // =============================================================================
 // INITIALIZATION
 // =============================================================================
 
-bool TMC2209Driver::init() {
-    Serial.println("TMC2209 Driver: Initializing...");
+bool TMC2208Driver::init() {
+    Serial.println("TMC2208 Driver: Initializing...");
     
-    // Configure GPIO pins
+    // Configure control pins
     pinMode(_enPin, OUTPUT);
     pinMode(_stepPin, OUTPUT);
     pinMode(_dirPin, OUTPUT);
     
-    digitalWrite(_enPin, HIGH);   // Start disabled
+    // Start disabled
+    digitalWrite(_enPin, HIGH);  // HIGH = disabled
     digitalWrite(_stepPin, LOW);
     digitalWrite(_dirPin, LOW);
     
     _enabled = false;
+    _position = 0;
+    _targetPosition = 0;
+    _moving = false;
     
     // Initialize UART
     _serial->begin(TMC_UART_BAUD, SERIAL_8N1, _rxPin, _txPin);
@@ -95,41 +108,43 @@ bool TMC2209Driver::init() {
     if (_driver != nullptr) {
         delete _driver;
     }
-    _driver = new TMC2209Stepper(_serial, _rSense, _address);
+    _driver = new TMC2208Stepper(_serial, _rSense);
     _driver->begin();
     delay(50);
     
-    // Test connection
+    // Test UART connection
     if (!testConnection()) {
-        Serial.println("TMC2209: ⚠️ UART connection failed!");
+        Serial.println("TMC2208: ⚠️ UART connection failed!");
         Serial.println("         Driver can still work in Step/Dir mode.");
         Serial.println("         Send 'stepdir on' command to enable fallback mode.");
         Serial.println("         In Step/Dir mode: current set by Vref, microsteps by MS1/MS2 pins.");
-        Serial.println("         Note: StallGuard homing will NOT work in Step/Dir mode.");
         // DON'T auto-switch to Step/Dir - let user decide
         _uartMode = true;  // Keep trying UART until user switches
     } else {
-        Serial.println("TMC2209 Driver: UART connected ✓");
+        Serial.println("TMC2208 Driver: UART connected ✓");
         _uartMode = true;
         
         // Configure driver with current settings
         configureDriver();
     }
     
-    Serial.println("TMC2209 Driver: Ready");
+    Serial.println("TMC2208 Driver: Ready");
+    Serial.println("  Note: TMC2208 has NO StallGuard - use limit switches for homing");
     
-    // Enable driver
+    // Enable the driver
     enable();
     
     return true;
 }
 
-void TMC2209Driver::configureDriver() {
-    if (_driver == nullptr) return;
+void TMC2208Driver::configureDriver() {
+    if (_driver == nullptr || !_uartMode) return;
+    
+    Serial.println("TMC2208: Configuring via UART...");
     
     // Basic configuration
     _driver->toff(5);                     // Enable driver
-    _driver->en_spreadCycle(false);       // StealthChop mode
+    _driver->en_spreadCycle(false);       // StealthChop mode (silent)
     _driver->pwm_autoscale(true);         // Auto current scaling
     _driver->pdn_disable(true);           // Use UART, not PDN for current
     _driver->mstep_reg_select(true);      // Microsteps via UART
@@ -138,45 +153,26 @@ void TMC2209Driver::configureDriver() {
     _driver->rms_current(_runCurrentMA);
     _driver->ihold(_holdCurrentMA > 0 ? (_holdCurrentMA * 31 / _runCurrentMA) : 0);
     
-    // Microsteps - use direct CHOPCONF write for fullstep (MRES=8) support
+    // Microsteps - use direct CHOPCONF write for all values
     uint8_t mres = microStepsToMRES(_microsteps);
     uint32_t chopconf = _driver->CHOPCONF();
     chopconf = (chopconf & 0xF0FFFFFF) | ((uint32_t)mres << 24);
     _driver->CHOPCONF(chopconf);
     
-    // StallGuard
-    _driver->SGTHRS(_stallThreshold);
-    _driver->TCOOLTHRS(0xFFFFF);  // Enable at all speeds
-    
     delay(50);
+    
+    Serial.print("  Current: ");
+    Serial.print(_runCurrentMA);
+    Serial.println(" mA RMS");
+    Serial.print("  Microsteps: 1/");
+    Serial.println(_microsteps);
 }
 
-void TMC2209Driver::reconfigure() {
+void TMC2208Driver::reconfigure() {
     if (_uartMode) {
         configureDriver();
     } else {
-        Serial.println("TMC2209: Cannot reconfigure in Step/Dir mode");
-    }
-}
-
-void TMC2209Driver::setStepDirMode(bool enabled) {
-    if (enabled) {
-        _uartMode = false;
-        Serial.println("TMC2209: Switched to Step/Dir only mode");
-        Serial.println("  - Microstepping: determined by MS1/MS2 pins");
-        Serial.println("  - Current limit: determined by Vref potentiometer");
-        Serial.println("  - StallGuard: NOT available (use limit switches)");
-        Serial.println("  - CoolStep: NOT available");
-        Serial.println("  - Runtime configuration: NOT available");
-    } else {
-        // Try to re-enable UART
-        if (testConnection()) {
-            _uartMode = true;
-            configureDriver();
-            Serial.println("TMC2209: UART mode re-enabled ✓");
-        } else {
-            Serial.println("TMC2209: UART still unavailable - staying in Step/Dir mode");
-        }
+        Serial.println("TMC2208: Cannot reconfigure in Step/Dir mode");
     }
 }
 
@@ -184,18 +180,18 @@ void TMC2209Driver::setStepDirMode(bool enabled) {
 // ENABLE / DISABLE
 // =============================================================================
 
-void TMC2209Driver::enable() {
+void TMC2208Driver::enable() {
     digitalWrite(_enPin, LOW);  // Active LOW
     _enabled = true;
 }
 
-void TMC2209Driver::disable() {
+void TMC2208Driver::disable() {
     digitalWrite(_enPin, HIGH);
     _enabled = false;
     _moving = false;
 }
 
-bool TMC2209Driver::isEnabled() const {
+bool TMC2208Driver::isEnabled() const {
     return _enabled;
 }
 
@@ -203,7 +199,7 @@ bool TMC2209Driver::isEnabled() const {
 // MOTION CONTROL
 // =============================================================================
 
-void TMC2209Driver::move(int32_t steps) {
+void TMC2208Driver::move(int32_t steps) {
     if (steps == 0) return;
     
     // Store move parameters
@@ -217,7 +213,6 @@ void TMC2209Driver::move(int32_t steps) {
     
     // Plan motion based on profile type
     if (_profile.type == VelocityProfileType::CONSTANT) {
-        // No acceleration - fixed speed
         _accelSteps = 0;
         _decelSteps = 0;
         _currentSpeed = _profile.maxSpeed;
@@ -234,31 +229,27 @@ void TMC2209Driver::move(int32_t steps) {
     _lastStepTime = micros();
 }
 
-void TMC2209Driver::moveTo(int32_t position) {
-    if (position < 0) position = 0;  // Only positive positions
+void TMC2208Driver::moveTo(int32_t position) {
+    if (position < 0) position = 0;
     int32_t delta = position - _position;
     move(delta);
 }
 
-void TMC2209Driver::stop() {
-    // Emergency stop - immediate halt without deceleration
-    // For controlled deceleration, use setMaxSpeed(0) instead
+void TMC2208Driver::stop() {
     _moving = false;
     _currentSpeed = 0;
 }
 
-void TMC2209Driver::emergencyStop() {
+void TMC2208Driver::emergencyStop() {
     _moving = false;
     _currentSpeed = 0;
-    // Target stays where we stopped
-    _targetPosition = _position;
 }
 
-bool TMC2209Driver::isMoving() const {
+bool TMC2208Driver::isMoving() const {
     return _moving;
 }
 
-void TMC2209Driver::update() {
+void TMC2208Driver::update() {
     if (!_moving || !_enabled) return;
     
     uint32_t now = micros();
@@ -282,40 +273,37 @@ void TMC2209Driver::update() {
         } else if (_profile.type == VelocityProfileType::S_CURVE) {
             updateSCurveSpeed();
         }
-        // CONSTANT profile: speed stays fixed, no update needed
     }
 }
 
-void TMC2209Driver::doStep() {
+void TMC2208Driver::doStep() {
     // Generate step pulse
     digitalWrite(_stepPin, HIGH);
-    delayMicroseconds(2);  // Minimum pulse width (TMC2209 requires ~100ns, 2µs is 20x margin)
+    delayMicroseconds(2);  // Minimum pulse width (TMC2208 requires ~100ns, 2µs is 20x margin)
     digitalWrite(_stepPin, LOW);
     
     // Update position based on move direction
     _position += _moveDirection;
 }
 
-void TMC2209Driver::calculateStepInterval() {
-    // Convert current speed (steps/sec) to interval (microseconds)
+void TMC2208Driver::calculateStepInterval() {
     float speed = _currentSpeed;
-    if (speed <= 0) speed = _maxSpeed;  // Fallback to max speed
-    if (speed <= 0) speed = 1;          // Safety
+    if (speed <= 0) speed = _maxSpeed;
+    if (speed <= 0) speed = 1;
     
     _stepInterval = (uint32_t)(1000000.0f / speed);
-    if (_stepInterval < 10) _stepInterval = 10;  // Minimum 10µs (100kHz max)
+    if (_stepInterval < 10) _stepInterval = 10;
 }
 
 // =============================================================================
 // MOTION PLANNING - TRAPEZOIDAL
 // =============================================================================
 
-void TMC2209Driver::planTrapezoidalMotion() {
+void TMC2208Driver::planTrapezoidalMotion() {
     float accel = _profile.acceleration;
     float maxSpeed = _profile.maxSpeed;
     
     if (accel <= 0) {
-        // No acceleration configured - treat as constant
         _accelSteps = 0;
         _decelSteps = 0;
         _currentSpeed = maxSpeed;
@@ -323,28 +311,22 @@ void TMC2209Driver::planTrapezoidalMotion() {
         return;
     }
     
-    // Steps to reach max speed: v² = 2ad → d = v²/(2a)
     int32_t stepsToMaxSpeed = (int32_t)((maxSpeed * maxSpeed) / (2.0f * accel));
     
     if (2 * stepsToMaxSpeed >= _totalMoveSteps) {
-        // Triangular profile - we never reach max speed
-        // Peak at halfway point
         _isTriangular = true;
         _accelSteps = _totalMoveSteps / 2;
         _decelSteps = _totalMoveSteps - _accelSteps;
     } else {
-        // Full trapezoidal - accel, cruise, decel
         _isTriangular = false;
         _accelSteps = stepsToMaxSpeed;
         _decelSteps = stepsToMaxSpeed;
     }
     
-    // Start from minimum speed (not zero, to avoid division issues)
-    _currentSpeed = 50.0f;  // Minimum starting speed
+    _currentSpeed = 50.0f;
 }
 
-void TMC2209Driver::updateTrapezoidalSpeed() {
-    // Calculate how many steps we've done and how many remain
+void TMC2208Driver::updateTrapezoidalSpeed() {
     int32_t stepsDone = abs(_position - _startPosition);
     int32_t stepsRemaining = abs(_targetPosition - _position);
     
@@ -352,25 +334,18 @@ void TMC2209Driver::updateTrapezoidalSpeed() {
     float maxSpeed = _profile.maxSpeed;
     
     if (stepsDone < _accelSteps) {
-        // Accelerating phase
-        // v = sqrt(2 * a * d) where d = steps done + 1 (look ahead)
         _currentSpeed = sqrtf(2.0f * accel * (float)(stepsDone + 1));
         _currentSpeed = min(_currentSpeed, maxSpeed);
     } 
     else if (stepsRemaining <= _decelSteps) {
-        // Decelerating phase  
-        // v = sqrt(2 * a * d) where d = steps remaining
         _currentSpeed = sqrtf(2.0f * accel * (float)stepsRemaining);
     }
     else {
-        // Cruising at max speed
         _currentSpeed = maxSpeed;
     }
     
-    // Enforce minimum speed to prevent stalling
     if (_currentSpeed < 50.0f) _currentSpeed = 50.0f;
     
-    // Update step interval based on new speed
     calculateStepInterval();
 }
 
@@ -378,7 +353,7 @@ void TMC2209Driver::updateTrapezoidalSpeed() {
 // MOTION PLANNING - S-CURVE (7-segment)
 // =============================================================================
 
-void TMC2209Driver::planSCurveMotion() {
+void TMC2208Driver::planSCurveMotion() {
     // 7-segment S-curve profile:
     // Seg 0: Jerk+ (acceleration increasing from 0)
     // Seg 1: Constant acceleration (at max accel)
@@ -394,7 +369,6 @@ void TMC2209Driver::planSCurveMotion() {
     float minSpeed = 50.0f;  // Minimum speed to prevent stalling
     
     if (jerk <= 0 || maxAccel <= 0) {
-        // Fall back to trapezoidal if jerk not configured
         planTrapezoidalMotion();
         return;
     }
@@ -409,25 +383,19 @@ void TMC2209Driver::planSCurveMotion() {
     float jerkPhaseVel = jerk * t_j * t_j / 2.0f;
     
     // Velocity gained during constant accel phase to reach max speed
-    // We need: minSpeed + 2*jerkPhaseVel + constAccelVel = maxSpeed
     float constAccelVel = maxSpeed - minSpeed - 2.0f * jerkPhaseVel;
     
     float constAccelDist = 0;
     float t_a = 0;
     
-    // Check if we can reach max accel and have a constant accel phase
     if (constAccelVel > 0) {
-        // We have a constant acceleration phase
         t_a = constAccelVel / maxAccel;
-        // Distance during constant accel: s = v0*t + 0.5*a*t²
         float v_at_seg1_start = minSpeed + jerkPhaseVel;
         constAccelDist = v_at_seg1_start * t_a + 0.5f * maxAccel * t_a * t_a;
     } else {
         // Short move or low max speed - scale down the profile
-        // Reduce max accel and jerk proportionally
         float velocityBudget = maxSpeed - minSpeed;
         if (velocityBudget <= 0) {
-            // Can't even accelerate - use constant speed
             _profile.type = VelocityProfileType::CONSTANT;
             _accelSteps = 0;
             _decelSteps = 0;
@@ -435,47 +403,36 @@ void TMC2209Driver::planSCurveMotion() {
             _isTriangular = false;
             return;
         }
-        // No constant accel phase - just jerk phases
         jerkPhaseVel = velocityBudget / 2.0f;
-        // Recalculate t_j for this reduced velocity gain: v = j*t²/2 -> t = sqrt(2v/j)
         t_j = sqrtf(2.0f * jerkPhaseVel / jerk);
         jerkPhaseDist = jerk * t_j * t_j * t_j / 6.0f;
         constAccelVel = 0;
         constAccelDist = 0;
     }
     
-    // Distance for segment 2 (jerk-): starts at (minSpeed + jerkPhaseVel + constAccelVel), ends at maxSpeed
-    // During this phase: v(t) = v0 + a0*t - j*t²/2, where a0 = maxAccel (or scaled accel)
+    // Distance for segment 2
     float v_at_seg2_start = minSpeed + jerkPhaseVel + constAccelVel;
     float seg2Dist = v_at_seg2_start * t_j + 0.5f * maxAccel * t_j * t_j - jerk * t_j * t_j * t_j / 6.0f;
     
-    // Total distance for acceleration side (3 segments)
     float accelSideDist = jerkPhaseDist + constAccelDist + seg2Dist;
-    
-    // Deceleration side is symmetric
     float decelSideDist = accelSideDist;
-    
-    // Check if we have room for cruise phase
     float totalAccelDecelDist = accelSideDist + decelSideDist;
     float cruiseDist = (float)_totalMoveSteps - totalAccelDecelDist;
     
     if (cruiseDist < 0) {
-        // Not enough room for full S-curve - scale down the profile
-        // Use available distance and reduce max speed proportionally
+        // Scale down the profile for short moves
         float availablePerSide = (float)_totalMoveSteps / 2.0f;
         float scaleFactor = availablePerSide / accelSideDist;
         
         if (scaleFactor < 0.1f) {
-            // Very short move - fall back to trapezoidal
             planTrapezoidalMotion();
             return;
         }
         
-        // Scale velocities and distances
         jerkPhaseVel *= scaleFactor;
         constAccelVel *= scaleFactor;
-        jerkPhaseDist *= scaleFactor * scaleFactor * scaleFactor;  // Distance scales as t³ for jerk phase
-        constAccelDist *= scaleFactor * scaleFactor;  // Distance scales as t² for const accel
+        jerkPhaseDist *= scaleFactor * scaleFactor * scaleFactor;
+        constAccelDist *= scaleFactor * scaleFactor;
         seg2Dist = availablePerSide - jerkPhaseDist - constAccelDist;
         accelSideDist = availablePerSide;
         decelSideDist = availablePerSide;
@@ -483,15 +440,14 @@ void TMC2209Driver::planSCurveMotion() {
         maxSpeed = minSpeed + 2.0f * jerkPhaseVel + constAccelVel;
     }
     
-    // Calculate segment end positions (cumulative steps from start)
     int32_t pos = 0;
     
-    // Segment 0: Jerk+ phase (a increases from 0)
+    // Segment 0: Jerk+ phase
     _scurveSegmentEnd[0] = pos + (int32_t)jerkPhaseDist;
     _scurveVelocity[0] = minSpeed;
     _scurveVelocity[1] = minSpeed + jerkPhaseVel;
     _scurveAccel[0] = 0;
-    _jerkSign[0] = jerk;  // Store actual jerk value
+    _jerkSign[0] = jerk;
     pos = _scurveSegmentEnd[0];
     
     // Segment 1: Constant acceleration
@@ -501,7 +457,7 @@ void TMC2209Driver::planSCurveMotion() {
     _jerkSign[1] = 0;
     pos = _scurveSegmentEnd[1];
     
-    // Segment 2: Jerk- phase (a decreases to 0)
+    // Segment 2: Jerk- phase
     _scurveSegmentEnd[2] = pos + (int32_t)seg2Dist;
     _scurveVelocity[3] = maxSpeed;
     _scurveAccel[2] = maxAccel;
@@ -515,7 +471,7 @@ void TMC2209Driver::planSCurveMotion() {
     _jerkSign[3] = 0;
     pos = _scurveSegmentEnd[3];
     
-    // Segment 4: Jerk- phase (a decreases from 0, starts decel)
+    // Segment 4: Jerk- phase (starting decel)
     _scurveSegmentEnd[4] = pos + (int32_t)seg2Dist;
     _scurveVelocity[5] = minSpeed + jerkPhaseVel + constAccelVel;
     _scurveAccel[4] = 0;
@@ -529,7 +485,7 @@ void TMC2209Driver::planSCurveMotion() {
     _jerkSign[5] = 0;
     pos = _scurveSegmentEnd[5];
     
-    // Segment 6: Jerk+ phase (a increases back to 0)
+    // Segment 6: Jerk+ phase (stopping)
     _scurveSegmentEnd[6] = _totalMoveSteps;
     _scurveVelocity[7] = minSpeed;
     _scurveAccel[6] = -maxAccel;
@@ -539,10 +495,9 @@ void TMC2209Driver::planSCurveMotion() {
     _isTriangular = false;
 }
 
-void TMC2209Driver::updateSCurveSpeed() {
+void TMC2208Driver::updateSCurveSpeed() {
     int32_t stepsDone = abs(_position - _startPosition);
     
-    // Find which segment we're in
     int segment = 0;
     for (int i = 0; i < 7; i++) {
         if (stepsDone < _scurveSegmentEnd[i]) {
@@ -552,7 +507,6 @@ void TMC2209Driver::updateSCurveSpeed() {
         if (i == 6) segment = 6;
     }
     
-    // Calculate position within segment
     int32_t segmentStart = (segment == 0) ? 0 : _scurveSegmentEnd[segment - 1];
     int32_t stepsInSegment = stepsDone - segmentStart;
     int32_t segmentLength = _scurveSegmentEnd[segment] - segmentStart;
@@ -567,24 +521,17 @@ void TMC2209Driver::updateSCurveSpeed() {
     int nextSeg = min(segment + 1, 7);
     float v1 = _scurveVelocity[nextSeg];
     float a0 = _scurveAccel[segment];
-    float j = _jerkSign[segment];  // Jerk value (can be +j, -j, or 0)
+    float j = _jerkSign[segment];
     
     // Use proper kinematic equations based on segment type
     if (j != 0) {
-        // Jerk phase: velocity changes quadratically with position
-        // Using time-based equations inverted to position-based
-        // Approximate: progress through segment determines velocity
+        // Jerk phase: use smooth S-curve interpolation
         float progress = (float)stepsInSegment / (float)segmentLength;
-        
-        // For jerk phases, velocity follows a parabolic curve
-        // v(progress) = v0 + (v1 - v0) * (3*progress² - 2*progress³) for S-curve shape
-        // This gives smooth acceleration at boundaries
         float smoothProgress = progress * progress * (3.0f - 2.0f * progress);
         _currentSpeed = v0 + (v1 - v0) * smoothProgress;
     }
     else if (a0 != 0) {
         // Constant acceleration phase: v² = v0² + 2*a*s
-        // v = sqrt(v0² + 2*a*stepsInSegment)
         float v_squared = v0 * v0 + 2.0f * a0 * (float)stepsInSegment;
         if (v_squared > 0) {
             _currentSpeed = sqrtf(v_squared);
@@ -597,7 +544,6 @@ void TMC2209Driver::updateSCurveSpeed() {
         _currentSpeed = v0;
     }
     
-    // Enforce minimum and maximum speed limits
     if (_currentSpeed < 50.0f) _currentSpeed = 50.0f;
     if (_currentSpeed > _profile.maxSpeed) _currentSpeed = _profile.maxSpeed;
     
@@ -608,159 +554,189 @@ void TMC2209Driver::updateSCurveSpeed() {
 // CONFIGURATION
 // =============================================================================
 
-void TMC2209Driver::setMaxSpeed(float stepsPerSecond) {
+void TMC2208Driver::setMaxSpeed(float stepsPerSecond) {
     if (stepsPerSecond <= 0) stepsPerSecond = 1;
     _maxSpeed = stepsPerSecond;
     _profile.maxSpeed = stepsPerSecond;
-    calculateStepInterval();
 }
 
-void TMC2209Driver::setCurrent(uint16_t runMA, uint16_t holdMA) {
+void TMC2208Driver::setCurrent(uint16_t runMA, uint16_t holdMA) {
     _runCurrentMA = runMA;
-    _holdCurrentMA = holdMA;
+    _holdCurrentMA = holdMA > 0 ? holdMA : runMA / 2;
     
     if (_uartMode && _driver != nullptr) {
         _driver->rms_current(_runCurrentMA);
-        _driver->ihold(_holdCurrentMA > 0 ? (_holdCurrentMA * 31 / _runCurrentMA) : 0);
-        Serial.print("TMC2209: Current set to ");
+        _driver->ihold(_holdCurrentMA * 31 / _runCurrentMA);
+        Serial.print("TMC2208: Current set to ");
         Serial.print(_runCurrentMA);
         Serial.println(" mA RMS");
     } else {
-        Serial.println("TMC2209: In Step/Dir mode - current set by Vref potentiometer");
+        Serial.println("TMC2208: In Step/Dir mode - current set by Vref potentiometer");
     }
 }
 
-void TMC2209Driver::setMicrosteps(uint16_t microsteps) {
-    // Validate
-    switch (microsteps) {
-        case 1: case 2: case 4: case 8: case 16:
-        case 32: case 64: case 128: case 256:
-            break;
-        default:
-            microsteps = 16;  // Default
-    }
-    
+void TMC2208Driver::setMicrosteps(uint16_t microsteps) {
     _microsteps = microsteps;
     
     if (_uartMode && _driver != nullptr) {
-        // Use direct CHOPCONF write for fullstep support
         uint8_t mres = microStepsToMRES(microsteps);
         uint32_t chopconf = _driver->CHOPCONF();
         chopconf = (chopconf & 0xF0FFFFFF) | ((uint32_t)mres << 24);
         _driver->CHOPCONF(chopconf);
         
-        Serial.print("TMC2209: Microsteps set to 1/");
+        Serial.print("TMC2208: Microsteps set to 1/");
         Serial.println(_microsteps);
     } else {
-        Serial.println("TMC2209: In Step/Dir mode - microsteps set by MS1/MS2 pins");
+        Serial.println("TMC2208: In Step/Dir mode - microsteps set by MS1/MS2 pins");
     }
 }
 
-void TMC2209Driver::setAccelerationProfile(const AccelerationProfile& profile) {
+void TMC2208Driver::setAccelerationProfile(const AccelerationProfile& profile) {
     _profile = profile;
     _maxSpeed = profile.maxSpeed;
-    calculateStepInterval();
+}
+
+// =============================================================================
+// TMC2208-SPECIFIC METHODS
+// =============================================================================
+
+void TMC2208Driver::setStealthChop(bool enable) {
+    if (_uartMode && _driver != nullptr) {
+        _driver->en_spreadCycle(!enable);  // false = StealthChop, true = SpreadCycle
+        Serial.print("TMC2208: ");
+        Serial.println(enable ? "StealthChop enabled (silent)" : "SpreadCycle enabled (high torque)");
+    } else {
+        Serial.println("TMC2208: Cannot change mode in Step/Dir fallback");
+    }
+}
+
+void TMC2208Driver::setStepDirMode(bool enabled) {
+    if (enabled) {
+        _uartMode = false;
+        Serial.println("TMC2208: Switched to Step/Dir only mode");
+        Serial.println("  - Microstepping: determined by MS1/MS2 pins");
+        Serial.println("  - Current limit: determined by Vref potentiometer");
+        Serial.println("  - Runtime configuration: NOT available");
+    } else {
+        // Try to re-enable UART
+        if (testConnection()) {
+            _uartMode = true;
+            configureDriver();
+            Serial.println("TMC2208: UART mode re-enabled ✓");
+        } else {
+            Serial.println("TMC2208: UART still unavailable - staying in Step/Dir mode");
+        }
+    }
+}
+
+uint8_t TMC2208Driver::microStepsToMRES(uint16_t ms) {
+    switch (ms) {
+        case 256: return 0;
+        case 128: return 1;
+        case 64:  return 2;
+        case 32:  return 3;
+        case 16:  return 4;
+        case 8:   return 5;
+        case 4:   return 6;
+        case 2:   return 7;
+        case 1:   return 8;  // Full step
+        default:  return 4;  // Default to 16
+    }
+}
+
+uint16_t TMC2208Driver::mrestoMicrosteps(uint8_t mres) {
+    switch (mres) {
+        case 0: return 256;
+        case 1: return 128;
+        case 2: return 64;
+        case 3: return 32;
+        case 4: return 16;
+        case 5: return 8;
+        case 6: return 4;
+        case 7: return 2;
+        case 8: return 1;
+        default: return 16;
+    }
+}
+
+// =============================================================================
+// CONNECTION TEST
+// =============================================================================
+
+bool TMC2208Driver::testConnection() {
+    if (_driver == nullptr) return false;
+    
+    // Read IOIN register - should return a valid value
+    uint32_t ioin = _driver->IOIN();
+    
+    // If version field is 0 or 0xFF, likely no connection
+    uint8_t version = (ioin >> 24) & 0xFF;
+    
+    // TMC2208 should return version 0x20
+    return (version == 0x20);
 }
 
 // =============================================================================
 // POSITION
 // =============================================================================
 
-int32_t TMC2209Driver::getPosition() const {
+int32_t TMC2208Driver::getPosition() const {
     return _position;
 }
 
-void TMC2209Driver::setPosition(int32_t position) {
+void TMC2208Driver::setPosition(int32_t position) {
     _position = position;
 }
 
-void TMC2209Driver::home(int8_t direction) {
-    // Use StallGuard to detect home position (requires UART mode)
-    if (!_uartMode) {
-        Serial.println("TMC2209: Homing NOT available in Step/Dir mode!");
-        Serial.println("         Use physical limit switches instead.");
-        Serial.println("         Switch to UART mode with 'stepdir off' to use StallGuard homing.");
-        _position = 0;
-        _targetPosition = 0;
-        return;
-    }
-    
-    Serial.println("Homing (using StallGuard)...");
-    
-    // Move in specified direction until stall
-    move(direction * 10000);  // Large number of steps
-    
-    while (isMoving()) {
-        update();
-        
-        if (isStalling()) {
-            emergencyStop();
-            Serial.println("Stall detected - home found!");
-            break;
-        }
-        
-        yield();  // Prevent watchdog timeout
-    }
-    
-    // Set current position as home (0)
+void TMC2208Driver::home(int8_t direction) {
+    // TMC2208 has no StallGuard - homing requires external limit switch
+    Serial.println("TMC2208: Homing not supported (no StallGuard)");
+    Serial.println("  Use external limit switch for homing");
     _position = 0;
     _targetPosition = 0;
 }
 
 // =============================================================================
-// DIAGNOSTICS
+// STATUS
 // =============================================================================
 
-MotorStatus TMC2209Driver::getStatus() {
+MotorStatus TMC2208Driver::getStatus() {
     MotorStatus status;
     
     status.enabled = _enabled;
     status.moving = _moving;
+    status.stalling = false;  // TMC2208 has NO StallGuard
+    
     status.position = _position;
     status.targetPosition = _targetPosition;
-    status.currentMA = _runCurrentMA;
+    
+    status.currentMA = _runCurrentMA;  // From configuration
+    status.loadValue = 0;  // No StallGuard on TMC2208
     status.currentSpeed = _currentSpeed;
     
-    if (_driver != nullptr) {
-        // Read StallGuard result
-        status.loadValue = _driver->SG_RESULT();
-        status.stalling = isStalling();
+    status.errorFlags = MotorError::NONE;
+    
+    // If UART available, try to read error flags
+    if (_uartMode && _driver != nullptr) {
+        uint32_t drv_status = _driver->DRV_STATUS();
         
-        // Read DRV_STATUS for errors
-        uint32_t drvStatus = _driver->DRV_STATUS();
-        
-        status.errorFlags = MotorError::NONE;
-        
-        if ((drvStatus >> 26) & 1) {  // ot (over-temp)
+        if (drv_status & 0x00000001) {  // OT (overtemperature)
             status.errorFlags |= MotorError::OVER_TEMP;
         }
-        if (((drvStatus >> 27) & 1) || ((drvStatus >> 28) & 1)) {  // s2ga, s2gb
-            status.errorFlags |= MotorError::SHORT_CIRCUIT;
-        }
-        if (((drvStatus >> 29) & 1) || ((drvStatus >> 30) & 1)) {  // ola, olb
+        if (drv_status & 0x00001000) {  // Open load A
             status.errorFlags |= MotorError::OPEN_LOAD;
         }
-        
-        // Check UART communication
-        if (_driver->test_connection() != 0) {
-            status.errorFlags |= MotorError::COMM_FAILURE;
+        if (drv_status & 0x00002000) {  // Open load B
+            status.errorFlags |= MotorError::OPEN_LOAD;
         }
     }
     
     return status;
 }
 
-bool TMC2209Driver::isStalling() {
-    if (!_uartMode || _driver == nullptr) return false;
-    
-    // StallGuard result drops when motor is loaded
-    uint16_t sgResult = _driver->SG_RESULT();
-    return sgResult < _stallThreshold;
-}
-
-void TMC2209Driver::printDiagnostics() {
+void TMC2208Driver::printDiagnostics() {
     Serial.println("\n═══════════════════════════════════════════════════════════════");
-    Serial.println("                TMC2209 DIAGNOSTICS");
+    Serial.println("                TMC2208 DIAGNOSTICS");
     Serial.println("═══════════════════════════════════════════════════════════════\n");
     
     Serial.print("  Mode:         ");
@@ -782,122 +758,32 @@ void TMC2209Driver::printDiagnostics() {
     if (_uartMode && _driver != nullptr) {
         Serial.println("\n  --- UART Diagnostics ---");
         
-        // Connection test
-        Serial.print("  Connection:   ");
-        uint8_t connResult = _driver->test_connection();
-        Serial.println(connResult == 0 ? "OK ✓" : "FAILED ✗");
-        
-        // Registers
-        Serial.print("  GCONF:        0x"); Serial.println(_driver->GCONF(), HEX);
-        Serial.print("  CHOPCONF:     0x"); Serial.println(_driver->CHOPCONF(), HEX);
-        Serial.print("  DRV_STATUS:   0x"); Serial.println(_driver->DRV_STATUS(), HEX);
-        Serial.print("  IOIN:         0x"); Serial.println(_driver->IOIN(), HEX);
-        
-        // Configuration readback
-        Serial.println("\n  --- Configuration ---");
-        Serial.print("  Current:      "); Serial.print(_driver->rms_current()); Serial.println(" mA");
-        
-        // Read microsteps from CHOPCONF
+        uint32_t drv_status = _driver->DRV_STATUS();
         uint32_t chopconf = _driver->CHOPCONF();
-        uint8_t mres_raw = (chopconf >> 24) & 0x0F;
-        uint16_t ms = mrestoMicrosteps(mres_raw);
-        Serial.print("  Microsteps:   1/"); Serial.println(ms);
         
-        Serial.print("  TOFF:         "); Serial.println(_driver->toff());
-        Serial.print("  StealthChop:  "); Serial.println(_driver->en_spreadCycle() ? "Off (SpreadCycle)" : "On (Silent)");
-        Serial.print("  SG Result:    "); Serial.println(_driver->SG_RESULT());
-        Serial.print("  Stalling:     "); Serial.println(isStalling() ? "⚠️ YES!" : "No");
+        Serial.print("  DRV_STATUS:   0x");
+        Serial.println(drv_status, HEX);
+        
+        Serial.print("  CHOPCONF:     0x");
+        Serial.println(chopconf, HEX);
+        
+        Serial.print("  StealthChop:  ");
+        Serial.println(_driver->stealth() ? "Active" : "Inactive");
+        
+        Serial.print("  Standstill:   ");
+        Serial.println((drv_status & 0x80000000) ? "Yes" : "No");
+        
+        Serial.print("  Overtemp:     ");
+        Serial.println((drv_status & 0x00000001) ? "⚠️ YES!" : "No");
+        
+        Serial.print("  OT Warning:   ");
+        Serial.println((drv_status & 0x00000002) ? "⚠️ YES!" : "No");
+        
+        // Note: TMC2208 has NO StallGuard
+        Serial.println("\n  Note: TMC2208 has NO StallGuard - use limit switches for homing");
     } else {
         Serial.println("\n  Note: No UART diagnostics available in Step/Dir mode");
     }
     
     Serial.println("\n═══════════════════════════════════════════════════════════════\n");
-}
-
-bool TMC2209Driver::testConnection() {
-    if (_driver == nullptr) return false;
-    return _driver->test_connection() == 0;
-}
-
-// =============================================================================
-// TMC2209-SPECIFIC METHODS
-// =============================================================================
-
-void TMC2209Driver::setStallThreshold(uint8_t threshold) {
-    _stallThreshold = threshold;
-    if (_driver != nullptr) {
-        _driver->SGTHRS(threshold);
-    }
-}
-
-uint16_t TMC2209Driver::getStallGuardResult() {
-    if (_driver == nullptr) return 0;
-    return _driver->SG_RESULT();
-}
-
-void TMC2209Driver::setStealthChop(bool enable) {
-    if (_driver == nullptr) return;
-    _driver->en_spreadCycle(!enable);  // Inverted: spreadCycle OFF = StealthChop ON
-}
-
-void TMC2209Driver::scanAddresses() {
-    Serial.println("\nScanning for TMC2209 drivers...");
-    
-    for (uint8_t addr = 0; addr < 4; addr++) {
-        TMC2209Stepper scanner(_serial, _rSense, addr);
-        scanner.begin();
-        delay(20);
-        
-        uint8_t result = scanner.test_connection();
-        Serial.print("  Address ");
-        Serial.print(addr);
-        Serial.print(": ");
-        
-        if (result == 0) {
-            Serial.println("TMC2209 found ✓");
-        } else {
-            Serial.println("No response");
-        }
-    }
-    Serial.println();
-}
-
-uint32_t TMC2209Driver::readRegister(uint8_t reg) {
-    // This is a simplified approach - for full register access
-    // you would use _driver's internal methods
-    // For now, provide common registers
-    if (_driver == nullptr) return 0;
-    
-    switch (reg) {
-        case 0x00: return _driver->GCONF();
-        case 0x01: return _driver->GSTAT();
-        case 0x06: return _driver->IOIN();
-        case 0x6C: return _driver->CHOPCONF();
-        case 0x6F: return _driver->DRV_STATUS();
-        default:   return 0;
-    }
-}
-
-// =============================================================================
-// HELPER METHODS
-// =============================================================================
-
-uint8_t TMC2209Driver::microStepsToMRES(uint16_t ms) {
-    switch (ms) {
-        case 256: return 0;
-        case 128: return 1;
-        case 64:  return 2;
-        case 32:  return 3;
-        case 16:  return 4;
-        case 8:   return 5;
-        case 4:   return 6;
-        case 2:   return 7;
-        case 1:   return 8;  // Fullstep - TMCStepper library doesn't support this via microsteps()
-        default:  return 4;  // Default to 16
-    }
-}
-
-uint16_t TMC2209Driver::mrestoMicrosteps(uint8_t mres) {
-    if (mres >= 8) return 1;  // MRES 8 = fullstep
-    return 256 >> mres;
 }

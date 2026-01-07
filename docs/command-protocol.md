@@ -10,6 +10,34 @@ The Universal Motor Module uses a human-readable serial command protocol at 1152
 - **Stop Bits:** 1
 - **Line Ending:** Newline (`\n`) or Carriage Return (`\r`)
 
+## Quick Reference
+
+### All Commands
+
+| Command | Stepper (TMC2209/2208) | DC Motor |
+|---------|------------------------|----------|
+| `move <n>` | Move n steps | Run for n milliseconds |
+| `abs <n>` | Move to position n | Set speed -1000 to +1000 |
+| `home` | StallGuard homing (TMC2209 only) | Not supported |
+| `stop` | Emergency stop | Stop with brake |
+| `enable` | Enable driver | Enable H-bridge |
+| `disable` | Disable driver (coast) | Disable (coast) |
+| `set speed <n>` | Max steps/sec | Max speed % (0-100) |
+| `set current <n>` | Motor current mA | Not applicable |
+| `set microsteps <n>` | Microstepping divisor | Not applicable |
+| `set accel <n>` | Acceleration steps/sec² | Ramp rate %/sec |
+| `set jerk <n>` | S-curve jerk | S-curve jerk |
+| `stepdir on/off` | UART ↔ Step/Dir mode | Not applicable |
+| `scan` | Scan UART addresses (TMC2209) | Not applicable |
+| `reboot` | Soft reset ESP32 | Soft reset ESP32 |
+| `?` or `status` | Show status | Show status |
+| `help` | Show commands | Show commands |
+| `t` or `test` | Test UART connection | Not applicable |
+| `r` or `diag` | Full diagnostics | Basic status |
+| `reconfigure` | Re-apply settings | Not applicable |
+
+---
+
 ## Command Reference
 
 ### Motion Commands
@@ -38,6 +66,13 @@ The Universal Motor Module uses a human-readable serial command protocol at 1152
 | `set accel <value>` | Set acceleration (steps/sec²) | `set accel 200` |
 | `set jerk <value>` | Set jerk for S-curve profile (steps/sec³) | `set jerk 1000` |
 
+### UART Control Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `stepdir on` | Switch to Step/Dir fallback mode | `stepdir on` |
+| `stepdir off` | Try to re-enable UART mode | `stepdir off` |
+
 ### Status & Diagnostics
 
 | Command | Description | Example |
@@ -47,6 +82,13 @@ The Universal Motor Module uses a human-readable serial command protocol at 1152
 | `t` or `test` | Test UART connection (TMC drivers) | `t` |
 | `r` or `diag` | Show full diagnostics | `r` |
 | `reconfigure` | Re-apply all settings after power glitch | `reconfigure` |
+| `scan` | Scan for TMC2209 at all 4 UART addresses | `scan` |
+
+### System Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `reboot` or `restart` | Soft reset the ESP32 | `reboot` |
 
 ## Command Details
 
@@ -121,6 +163,107 @@ set accel 500         # Trapezoidal profile: 500 steps/sec²
 # S-curve (jerk-limited)
 set accel 500
 set jerk 1000         # S-curve profile: accel=500, jerk=1000
+```
+
+### `stepdir on/off` (TMC Drivers Only)
+
+Switches between UART mode and Step/Dir fallback mode.
+
+```
+stepdir on            # Switch to Step/Dir only mode
+stepdir off           # Try to re-enable UART mode
+```
+
+**When to use:**
+- UART wiring not connected
+- UART communication failing
+- Want to use hardware potentiometer for current
+
+**In Step/Dir mode:**
+- Motor current: Set by Vref potentiometer (hardware)
+- Microstepping: Set by MS1/MS2 pins (hardware)
+- StallGuard: **NOT available** (TMC2209 only)
+- Homing: Requires physical limit switches
+- `set current` and `set microsteps` commands have no effect
+
+---
+
+## DC Motor Specific Commands
+
+When a DC motor (H-bridge) is detected, commands have different meanings:
+
+### `move <milliseconds>`
+
+Run the motor for a specified duration in milliseconds.
+
+```
+move 1000         # Run forward for 1 second
+move -500         # Run reverse for 500ms
+```
+
+The motor runs at the current speed setting. Motion uses the configured acceleration ramp.
+
+### `abs <speed>`
+
+Set the motor speed directly. Range: -1000 to +1000
+
+```
+abs 500           # 50% forward
+abs -300          # 30% reverse
+abs 0             # Stop
+abs 1000          # Full speed forward
+```
+
+**Note:** Unlike steppers, this is a direct speed command, not a position.
+
+### `set speed <percent>`
+
+Sets the maximum speed limit (0-100%).
+
+```
+set speed 80      # Limit to 80% max speed
+set speed 100     # Allow full speed
+```
+
+### `set accel <rate>`
+
+Sets the ramping rate for speed changes (% per second).
+
+```
+set accel 200     # Ramp at 200%/sec (0→100% in 0.5s)
+set accel 0       # Instant speed changes (no ramping)
+```
+
+### DC Motor Commands That Don't Apply
+
+| Command | Behavior |
+|---------|----------|
+| `set current` | No effect (hardware H-bridge) |
+| `set microsteps` | No effect (not a stepper) |
+| `set jerk` | No effect (uses simple ramping) |
+| `home` | Not supported (no position feedback) |
+| `stepdir` | Not applicable |
+| `reconfigure` | No effect |
+
+### DC Motor Example Session
+
+```
+> # DC Motor detected
+
+> set speed 80
+Max speed limited to 80%
+
+> move 2000
+Running forward for 2000ms...
+
+> abs -500
+Speed set to -50% (reverse)
+
+> stop
+Motor stopped (brake)
+
+> disable
+Motor disabled (coast)
 ```
 
 ## Example Session
