@@ -1,11 +1,111 @@
+# Unit Tests for Universal Motor Module
 
-This directory is intended for PlatformIO Test Runner and project tests.
+This directory contains unit tests using the PlatformIO Unity testing framework.
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+## Test Suites
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+| Test Suite | Purpose | Tests |
+|------------|---------|-------|
+| `test_acceleration_profile` | AccelerationProfile factory methods, type names | 23 |
+| `test_command_parsing` | Command string parsing (move, abs, set, stepdir) | 35 |
+| `test_motion_math` | Trapezoidal & S-curve motion calculations | 36 |
+| `test_motor_status` | MotorStatus struct and MotorError flags | 17 |
+
+**Total: 111 tests**
+
+## Running Tests
+
+### Native (PC) Tests
+Runs on your PC using mock Arduino functions. Best for pure logic testing.
+
+```bash
+# Run all native tests
+pio test -e native
+
+# Run specific test suite
+pio test -e native -f test_motion_math
+
+# Verbose output
+pio test -e native -v
+```
+
+### Device (ESP32) Tests
+Runs on actual ESP32 hardware. Use for hardware integration tests.
+
+```bash
+# Run all device tests
+pio test -e esp32-s3-mini
+
+# Note: Requires ESP32 connected via USB
+```
+
+## Directory Structure
+
+```
+test/
+├── README                          # This file
+├── mocks/
+│   ├── Arduino.h                   # Mock Arduino API for native testing
+│   └── Arduino.cpp                 # Mock implementation
+├── test_acceleration_profile/
+│   └── test_acceleration_profile.cpp
+├── test_command_parsing/
+│   └── test_command_parsing.cpp
+├── test_motion_math/
+│   └── test_motion_math.cpp
+└── test_motor_status/
+    └── test_motor_status.cpp
+```
+
+## What Gets Tested
+
+### Native-Compatible (Pure Logic)
+- AccelerationProfile factory methods
+- Velocity profile type detection
+- Motion planning math (kinematic equations)
+- S-curve interpolation
+- Step interval calculations
+- Microstep to MRES conversion
+- Command string parsing
+- Error flag bit operations
+- MotorStatus data structures
+
+### Device-Only (Hardware Required)
+- GPIO operations
+- UART communication
+- TMC driver register access
+- PWM output
+- Actual motor movement
+
+## Adding New Tests
+
+1. Create a new folder: `test/test_<name>/`
+2. Add test file: `test/test_<name>/test_<name>.cpp`
+3. Include headers:
+   ```cpp
+   #include <unity.h>
+   #include <Arduino.h>  // Uses mock in native build
+   ```
+4. Write test functions (must start with `test_`):
+   ```cpp
+   void test_my_feature(void) {
+       TEST_ASSERT_EQUAL(expected, actual);
+   }
+   ```
+5. Add main() with `UNITY_BEGIN()`, `RUN_TEST()`, `UNITY_END()`
+
+## Mock Arduino Functions
+
+The `test/mocks/Arduino.h` provides:
+- GPIO: `pinMode()`, `digitalWrite()`, `digitalRead()`
+- Time: `millis()`, `micros()`, `delay()`, `delayMicroseconds()`
+- Serial: `Serial.print()`, `Serial.println()`
+- PWM: `ledcSetup()`, `ledcAttachPin()`, `ledcWrite()`
+- String: Arduino String class with `trim()`, `toLowerCase()`, etc.
+- Math: `min()`, `max()`, `constrain()`, `abs()`
+
+For time-based tests, use:
+```cpp
+mockSetTime(1000);      // Set millis() to 1000
+mockAdvanceTime(100);   // Add 100ms to current time
+```
