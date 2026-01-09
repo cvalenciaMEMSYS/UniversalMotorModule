@@ -208,7 +208,7 @@ Connection: OK
 
 **Test Result**:
 
-- [ ] PASS
+- [x] PASS
 - [ ] SKIPPED
 
 ---
@@ -234,7 +234,7 @@ Connection: OK
 
 **Test Result**:
 
-- [ ] PASS
+- [ ] PASS > Seems like, even though almost not percebtible, motor does skip steps when using a non linear velocity profile, need to investigate pulse output of the controller. This results in a non consistent end position.
 - [ ] SKIPPED
 
 ##### 2.4.2 S-Curve Profile
@@ -254,7 +254,7 @@ Connection: OK
 
 **Test Result**:
 
-- [ ] PASS
+- [ ] PASS > Visually looks smoother so the curve does work, but the skipped steps at low speeds are evne more noticeable/
 - [ ] SKIPPED
 
 ##### 2.4.3 Constant Speed
@@ -270,7 +270,7 @@ Connection: OK
 
 **Test Result**:
 
-- [ ] PASS
+- [ ] PASS > Same as the rest, visually the most consistent one, step skipping happens at random.
 - [ ] SKIPPED
 
 ---
@@ -295,7 +295,7 @@ Connection: OK
 
 **Test Result**:
 
-- [ ] PASS
+- [ ] PASS > even though the driver reports back the correct updated current, the motor itself does not feel stronger. Matter of fact, it is easy to turn regardless of what current value is set, just a slightly increased resitance vs disabled. when moving it does have more torque at higher currents, but the holding torque gets reduced apparently?
 - [ ] SKIPPED
 
 ---
@@ -316,7 +316,7 @@ Connection: OK
 
 **Test Result**:
 
-- [ ] PASS
+- [x] PASS
 - [ ] SKIPPED
 
 ---
@@ -337,7 +337,7 @@ Connection: OK
 
 **Test Result**:
 
-- [ ] PASS
+- [x] PASS
 - [ ] SKIPPED
 
 ---
@@ -374,7 +374,7 @@ TMC2208: UART unavailable - using Step/Dir mode
 **Test Result**:
 
 - [ ] PASS
-- [ ] SKIPPED
+- [x] SKIPPED
 
 ---
 
@@ -502,12 +502,12 @@ TMC2208: UART unavailable - using Step/Dir mode
 
 Test various invalid inputs:
 
-- `MOVE abc` (non-numeric)
-- `MOVE 999999999999` (overflow)
-- `SPEED -100` (negative)
-- `CURRENT 10000` (out of range)
-- Empty command
-- Very long string (1000+ chars)
+- `MOVE abc` (non-numeric) > Handled correctly
+- `MOVE 999999999999` (overflow) > weird, target position does become an overflow negative value, but the motor does move in the positive direction, should be a guard to simply ignore command.
+- `SPEED -100` (negative) > Correct, speed is set to 1.
+- `CURRENT 10000` (out of range) > Works on driver side, current gets simply set to max.
+- Empty command > Does nothing, correct.
+- Very long string (1000+ chars) > Correct, invalid command.
 
 **Expected Results**:
 
@@ -517,7 +517,7 @@ Test various invalid inputs:
 
 **Test Result**:
 
-- [ ] PASS
+- [x] PASS
 - [ ] SKIPPED
 
 ---
@@ -540,7 +540,7 @@ Test various invalid inputs:
 **Test Result**:
 
 - [ ] PASS
-- [ ] SKIPPED
+- [x] SKIPPED > Not implemented! 
 
 ---
 
@@ -561,7 +561,7 @@ Test various invalid inputs:
 **Test Result**:
 
 - [ ] PASS
-- [ ] SKIPPED
+- [x] SKIPPED
 
 ---
 
@@ -577,7 +577,7 @@ Test various invalid inputs:
 
 - Motor accelerates partway, then decelerates
 - Never reaches max speed
-- Move completes accurately
+- Move completes accurately > Fail, motor does speed up and down without getting to max speed, but overshoots the expected end position by a lot.
 
 **Test Result**:
 
@@ -596,7 +596,7 @@ Test various invalid inputs:
 
 **Expected Results**:
 
-- 10 seconds to complete move
+- 10 seconds to complete move > Speeds under 1000 steps/s seem to increase the ammount of steps done? 1/16 microstepping config, 3200 steps per revolution. If ordered to move 3200 steps at any speed over 1000, it does 1 turn, any speed under that makes it do more than 1 turn.
 - Consistent timing
 - No jittering or stalling
 
