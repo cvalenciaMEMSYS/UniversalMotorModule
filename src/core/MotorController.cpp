@@ -20,8 +20,9 @@ MotorController::MotorController()
     , _wasMoving(false)
     , _errorFlags(MotorError::NONE)
     , _lastErrorPollTime(0) {
-    // Default profile: constant velocity
-    _profile = AccelerationProfile::constant(DefaultMotorConfig::STEPPER_MAX_SPEED);
+    // Initialize default motion parameters
+    _maxSpeed = DefaultMotorConfig::STEPPER_MAX_SPEED;
+    _acceleration = 1000.0f;
 }
 
 MotorController::~MotorController() {
@@ -53,8 +54,9 @@ bool MotorController::begin() {
         return false;
     }
     
-    // Apply default profile
-    _driver->setAccelerationProfile(_profile);
+    // Apply default motion parameters
+    _driver->setMaxSpeed(_maxSpeed);
+    _driver->setAcceleration(_acceleration);
     
     _initialized = true;
     
@@ -427,9 +429,9 @@ void MotorController::stop() {
 // =============================================================================
 
 void MotorController::setSpeed(float stepsPerSec) {
-    _profile.maxSpeed = stepsPerSec;
+    _maxSpeed = stepsPerSec;
     if (_driver != nullptr) {
-        _driver->setMaxSpeed(stepsPerSec);
+        _driver->setMaxSpeed(_maxSpeed);
     }
 }
 
@@ -446,58 +448,16 @@ void MotorController::setMicrosteps(uint16_t ms) {
 }
 
 void MotorController::setAcceleration(float accel) {
-    _profile.acceleration = accel;
-    
-    // Update profile type based on accel value
-    if (accel > 0) {
-        // If jerk is 0, use TRAPEZOIDAL; otherwise stay in S_CURVE
-        if (_profile.jerk == 0) {
-            _profile.type = VelocityProfileType::TRAPEZOIDAL;
-        }
-    } else {
-        // accel = 0: revert to CONSTANT (also reset jerk to prevent confusion)
-        _profile.type = VelocityProfileType::CONSTANT;
-        _profile.jerk = 0;
-    }
-    
+    _acceleration = accel;
     if (_driver != nullptr) {
-        _driver->setAccelerationProfile(_profile);
+        _driver->setAcceleration(_acceleration);
     }
-    
-    // Update LED to reflect profile change
-    statusLED.setAccelProfile(static_cast<AccelProfile>(_profile.type));
 }
 
 void MotorController::setJerk(float jerk) {
-    _profile.jerk = jerk;
-    
-    // Update profile type based on jerk value
-    if (jerk > 0) {
-        _profile.type = VelocityProfileType::S_CURVE;
-        
-        // S-curve requires acceleration to be set - auto-configure if missing
-        if (_profile.acceleration <= 0) {
-            // Default: ramp to max speed in 1 second
-            _profile.acceleration = _profile.maxSpeed;
-            Serial.print("Note: Auto-set acceleration to ");
-            Serial.print(_profile.acceleration);
-            Serial.println(" steps/sec² for S-curve");
-        }
-    } else {
-        // jerk = 0: revert to TRAPEZOIDAL if accel > 0, otherwise CONSTANT
-        if (_profile.acceleration > 0) {
-            _profile.type = VelocityProfileType::TRAPEZOIDAL;
-        } else {
-            _profile.type = VelocityProfileType::CONSTANT;
-        }
-    }
-    
-    if (_driver != nullptr) {
-        _driver->setAccelerationProfile(_profile);
-    }
-    
-    // Update LED to reflect profile change
-    statusLED.setAccelProfile(static_cast<AccelProfile>(_profile.type));
+    // Note: Jerk is handled internally by FastAccelStepper
+    // This method is kept for compatibility but does nothing
+    (void)jerk;  // Suppress unused parameter warning
 }
 
 void MotorController::enableMotor() {
@@ -558,18 +518,15 @@ void MotorController::printStatus() {
         Serial.println(status.loadValue);
     }
     
-    Serial.println("\n  Profile:");
-    Serial.print("    Type:         ");
-    Serial.println(_profile.getTypeName());
+    Serial.println("\n  Motion Control:");
+    Serial.print("    Type:         FastAccelStepper");
+    Serial.println();
     Serial.print("    Max Speed:    ");
-    Serial.print(_profile.maxSpeed);
+    Serial.print(_maxSpeed);
     Serial.println(" steps/sec");
     Serial.print("    Acceleration: ");
-    Serial.print(_profile.acceleration);
+    Serial.print(_acceleration);
     Serial.println(" steps/sec²");
-    Serial.print("    Jerk:         ");
-    Serial.print(_profile.jerk);
-    Serial.println(" steps/sec³");
     
     if (status.hasError()) {
         Serial.println("\n  ⚠ ERRORS:");

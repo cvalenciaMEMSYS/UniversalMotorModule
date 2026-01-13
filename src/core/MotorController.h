@@ -18,7 +18,7 @@
 #include <Arduino.h>
 #include "../drivers/IMotorDriver.h"
 #include "../drivers/DriverFactory.h"
-#include "AccelerationProfile.h"
+// Note: AccelerationProfile.h removed - now handled by FastAccelStepper library
 
 /**
  * @brief High-level motor controller
@@ -173,9 +173,12 @@ public:
 
 private:
     IMotorDriver* _driver;
-    AccelerationProfile _profile;
     bool _initialized;
     bool _wasMoving;  // Track movement state to detect completion
+    
+    // Motion configuration (simple, FastAccelStepper handles profiles)
+    float _maxSpeed;        // steps/s
+    float _acceleration;    // steps/s²
     
     // Error monitoring
     uint8_t _errorFlags;               // Cached error flags from last poll

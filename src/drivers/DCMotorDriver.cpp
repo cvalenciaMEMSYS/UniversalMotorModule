@@ -13,7 +13,7 @@
  */
 
 #include "DCMotorDriver.h"
-#include "../core/MotionMath.h"
+// Note: MotionMath.h removed - using simple acceleration ramping now
 
 // =============================================================================
 // CONSTRUCTORS
@@ -41,23 +41,7 @@ DCMotorDriver::DCMotorDriver(uint8_t in1Pin, uint8_t in2Pin)
     , _moveDirection(1)
     , _maxSpeedLimit(1.0f)
     , _lastUpdateTime(0)
-    , _usingSCurve(false)
-    , _scurveStartSpeed(0)
-    , _scurvePeakSpeed(0)
-    , _scurveTotalTime(0)
-    , _scurveJerk(0)
-    , _scurveMaxAccel(0) {
-    
-    // Initialize S-curve segment times
-    for (int i = 0; i < 7; i++) {
-        _scurveSegmentTime[i] = 0;
-    }
-    
-    // Default profile: moderate acceleration
-    _profile = AccelerationProfile::trapezoidal(
-        DefaultMotorConfig::DC_MAX_SPEED * 1000,  // Arbitrary units
-        DefaultMotorConfig::DC_ACCELERATION * 1000
-    );
+    , _accelerationRate(1.0f) {  // Default: 1.0 speed units/sec
 }
 
 DCMotorDriver::~DCMotorDriver() {
@@ -144,17 +128,10 @@ void DCMotorDriver::move(int32_t steps) {
     // Set target speed to max in the specified direction
     _targetSpeed = _moveDirection * _maxSpeedLimit;
     
-    // Check if we should use S-curve profile for this timed move
-    if (_profile.type == VelocityProfileType::S_CURVE && _profile.jerk > 0 && _profile.acceleration > 0) {
-        planTimedSCurve(_moveDuration, _targetSpeed);
-    } else {
-        _usingSCurve = false;
-        
-        // If no acceleration, apply immediately
-        if (_profile.acceleration <= 0) {
-            _currentSpeed = _targetSpeed;
-            applySpeed(_currentSpeed);
-        }
+    // If no acceleration, apply immediately
+    if (_accelerationRate <= 0) {
+        _currentSpeed = _targetSpeed;
+        applySpeed(_currentSpeed);
     }
     
     _lastUpdateTime = millis();
@@ -171,7 +148,7 @@ void DCMotorDriver::moveTo(int32_t position) {
     _virtualPosition = position;
     
     // If no acceleration, apply immediately
-    if (_profile.acceleration <= 0) {
+    if (_accelerationRate <= 0) {
         _currentSpeed = _targetSpeed;
         applySpeed(_currentSpeed);
     }
@@ -186,7 +163,7 @@ void DCMotorDriver::stop() {
     _moving = false;
     
     // If no acceleration, stop immediately
-    if (_profile.acceleration <= 0) {
+    if (_accelerationRate <= 0) {
         _currentSpeed = 0;
         applySpeed(0);
     }
@@ -224,7 +201,7 @@ void DCMotorDriver::update() {
     
     uint32_t now = millis();
     
-    // Handle timed moves with S-curve
+    // Handle timed moves
     if (_moving && _moveDuration > 0) {
         uint32_t elapsed = now - _moveStartTime;
         
@@ -233,21 +210,13 @@ void DCMotorDriver::update() {
             _targetSpeed = 0;
             _moving = false;
             _moveDuration = 0;
-            _usingSCurve = false;
             _currentSpeed = 0;
             applySpeed(0);
         }
-        else if (_usingSCurve) {
-            // Compute S-curve speed based on elapsed time
-            _currentSpeed = computeSCurveSpeed(elapsed);
-            applySpeed(_currentSpeed);
-        }
     }
     
-    // Apply acceleration ramping (for non-S-curve moves)
-    if (!_usingSCurve) {
-        updateRamping();
-    }
+    // Apply acceleration ramping
+    updateRamping();
     
     _lastUpdateTime = now;
 }
@@ -260,16 +229,12 @@ void DCMotorDriver::updateRamping() {
     
     if (dt <= 0) return;
     
-    // For trapezoidal: use linear ramping
-    // For constant: instant change
-    if (_profile.type == VelocityProfileType::CONSTANT || _profile.acceleration <= 0) {
+    // Simple linear ramping
+    if (_accelerationRate <= 0) {
         _currentSpeed = _targetSpeed;
     } else {
-        // Calculate speed change based on acceleration
-        float accel = _profile.acceleration / 1000.0f;  // Convert from arbitrary units
-        
         float speedDiff = _targetSpeed - _currentSpeed;
-        float maxChange = accel * dt;
+        float maxChange = _accelerationRate * dt;
         
         if (abs(speedDiff) <= maxChange) {
             _currentSpeed = _targetSpeed;
@@ -279,196 +244,6 @@ void DCMotorDriver::updateRamping() {
     }
     
     applySpeed(_currentSpeed);
-}
-
-void DCMotorDriver::planTimedSCurve(uint32_t duration, float targetSpeed) {
-    // Plan a symmetric S-curve profile that fits within the given duration
-    // Profile: accel ramp up -> cruise -> decel ramp down
-    // 
-    // For a symmetric move that starts and ends at 0 speed:
-    // - 3 segments for acceleration (jerk+, const accel, jerk-)
-    // - 1 segment for cruise
-    // - 3 segments for deceleration (jerk-, const decel, jerk+)
-    
-    _usingSCurve = true;
-    _scurveStartSpeed = 0;
-    _scurvePeakSpeed = abs(targetSpeed);
-    _scurveTotalTime = duration;
-    
-    // Get profile parameters (scale down from arbitrary units to 0-1 range per second)
-    float jerk = _profile.jerk / 1000.0f;      // Units: speed/sec² 
-    float maxAccel = _profile.acceleration / 1000.0f;  // Units: speed/sec
-    
-    if (jerk <= 0) jerk = 5.0f;   // Default jerk
-    if (maxAccel <= 0) maxAccel = 2.0f;  // Default accel
-    
-    _scurveJerk = jerk;
-    _scurveMaxAccel = maxAccel;
-    
-    // Calculate time to reach max acceleration: t_j = a_max / j
-    float t_j = maxAccel / jerk;
-    uint32_t t_j_ms = (uint32_t)(t_j * 1000.0f);
-    
-    // Velocity gained during jerk phase: v = j * t² / 2
-    float jerkPhaseVel = jerk * t_j * t_j / 2.0f;
-    
-    // Calculate how much velocity we need to gain from start to peak
-    float velocityToGain = _scurvePeakSpeed;
-    
-    // Total accel phase needs: 2 * jerkPhaseVel + constAccelVel = velocityToGain
-    float constAccelVel = velocityToGain / 2.0f - jerkPhaseVel;  // Half for accel, half for decel
-    
-    float t_a = 0;
-    uint32_t t_a_ms = 0;
-    
-    if (constAccelVel > 0) {
-        t_a = constAccelVel / maxAccel;
-        t_a_ms = (uint32_t)(t_a * 1000.0f);
-    } else {
-        // Short move - scale down jerk phases
-        constAccelVel = 0;
-        t_a_ms = 0;
-        // Recalculate t_j for reduced velocity: jerkPhaseVel = velocityToGain / 4
-        jerkPhaseVel = velocityToGain / 4.0f;
-        if (jerkPhaseVel > 0) {
-            t_j = sqrtf(2.0f * jerkPhaseVel / jerk);
-            t_j_ms = (uint32_t)(t_j * 1000.0f);
-        }
-    }
-    
-    // Total time for accel side (3 segments)
-    uint32_t accelSideTime = 2 * t_j_ms + t_a_ms;
-    uint32_t decelSideTime = accelSideTime;  // Symmetric
-    
-    // Cruise time
-    uint32_t cruiseTime = 0;
-    if (duration > accelSideTime + decelSideTime) {
-        cruiseTime = duration - accelSideTime - decelSideTime;
-    } else {
-        // Not enough time for full profile - scale everything down
-        float scaleFactor = (float)duration / (float)(accelSideTime + decelSideTime);
-        t_j_ms = (uint32_t)(t_j_ms * scaleFactor);
-        t_a_ms = (uint32_t)(t_a_ms * scaleFactor);
-        accelSideTime = 2 * t_j_ms + t_a_ms;
-        decelSideTime = accelSideTime;
-        cruiseTime = duration - accelSideTime - decelSideTime;
-        
-        // Recalculate peak speed for scaled profile
-        t_j = t_j_ms / 1000.0f;
-        t_a = t_a_ms / 1000.0f;
-        jerkPhaseVel = jerk * t_j * t_j / 2.0f;
-        constAccelVel = maxAccel * t_a;
-        _scurvePeakSpeed = 2.0f * (jerkPhaseVel * 2.0f + constAccelVel);
-        if (_scurvePeakSpeed > abs(targetSpeed)) {
-            _scurvePeakSpeed = abs(targetSpeed);
-        }
-    }
-    
-    // Store segment durations (cumulative end times)
-    _scurveSegmentTime[0] = t_j_ms;                               // Jerk+ (accel increasing)
-    _scurveSegmentTime[1] = _scurveSegmentTime[0] + t_a_ms;       // Const accel
-    _scurveSegmentTime[2] = _scurveSegmentTime[1] + t_j_ms;       // Jerk- (accel decreasing to 0)
-    _scurveSegmentTime[3] = _scurveSegmentTime[2] + cruiseTime;   // Cruise
-    _scurveSegmentTime[4] = _scurveSegmentTime[3] + t_j_ms;       // Jerk- (accel decreasing, decel starts)
-    _scurveSegmentTime[5] = _scurveSegmentTime[4] + t_a_ms;       // Const decel
-    _scurveSegmentTime[6] = duration;                              // Jerk+ (accel increasing to 0)
-}
-
-float DCMotorDriver::computeSCurveSpeed(uint32_t elapsedMs) {
-    if (!_usingSCurve || _scurveTotalTime == 0) {
-        return _targetSpeed;
-    }
-    
-    // Find which segment we're in
-    int segment = 0;
-    for (int i = 0; i < 7; i++) {
-        if (elapsedMs < _scurveSegmentTime[i]) {
-            segment = i;
-            break;
-        }
-        if (i == 6) segment = 6;
-    }
-    
-    // Get segment start time and duration
-    uint32_t segmentStart = (segment == 0) ? 0 : _scurveSegmentTime[segment - 1];
-    uint32_t segmentDuration = _scurveSegmentTime[segment] - segmentStart;
-    
-    if (segmentDuration == 0) {
-        // Skip zero-length segments
-        if (segment <= 2) return 0;
-        if (segment == 3) return _scurvePeakSpeed * _moveDirection;
-        return 0;
-    }
-    
-    float t = (elapsedMs - segmentStart) / 1000.0f;  // Time into segment (seconds)
-    float segT = segmentDuration / 1000.0f;          // Segment duration (seconds)
-    float progress = (float)(elapsedMs - segmentStart) / (float)segmentDuration;
-    
-    float speed = 0;
-    
-    switch (segment) {
-        case 0:  // Jerk+ phase (acceleration increasing from 0)
-            // v(t) = j * t² / 2, smooth start
-            speed = _scurveJerk * t * t / 2.0f;
-            break;
-            
-        case 1: {  // Constant acceleration phase
-            // v(t) = v0 + a * t
-            float v0 = _scurveJerk * segT * segT / 2.0f;  // Speed at end of seg 0
-            speed = v0 + _scurveMaxAccel * t;
-            break;
-        }
-            
-        case 2: {  // Jerk- phase (acceleration decreasing to 0)
-            // Smooth transition to cruise - use Hermite interpolation
-            float v0 = computeSCurveSpeed(_scurveSegmentTime[1]);  // Speed at seg 1 end
-            float v1 = _scurvePeakSpeed;
-            float smoothProgress = progress * progress * (3.0f - 2.0f * progress);
-            speed = abs(v0) + (v1 - abs(v0)) * smoothProgress;
-            break;
-        }
-            
-        case 3:  // Cruise phase
-            speed = _scurvePeakSpeed;
-            break;
-            
-        case 4: {  // Jerk- phase (start of deceleration)
-            // Smooth transition from cruise
-            float v0 = _scurvePeakSpeed;
-            float v1 = computeSCurveSpeed(_scurveSegmentTime[5] - 1);  // Approximate target
-            // Calculate target: symmetric to segment 2
-            uint32_t seg2Duration = _scurveSegmentTime[2] - _scurveSegmentTime[1];
-            float t_j = seg2Duration / 1000.0f;
-            v1 = _scurvePeakSpeed - _scurveJerk * t_j * t_j / 2.0f;
-            if (v1 < 0) v1 = 0;
-            speed = v0 + (v1 - v0) * MotionMath::smoothSCurveProgress(progress);
-            break;
-        }
-            
-        case 5: {  // Constant deceleration phase
-            float timeRemaining = (_scurveTotalTime - elapsedMs) / 1000.0f;
-            // v = a * t_remaining (approximately)
-            uint32_t seg6Duration = _scurveTotalTime - _scurveSegmentTime[5];
-            float t_j = seg6Duration / 1000.0f;
-            float endSpeed = _scurveJerk * t_j * t_j / 2.0f;
-            float segDur = segmentDuration / 1000.0f;
-            speed = endSpeed + _scurveMaxAccel * (segDur - t);
-            break;
-        }
-            
-        case 6: {  // Jerk+ phase (deceleration decreasing to 0)
-            float timeRemaining = (_scurveTotalTime - elapsedMs) / 1000.0f;
-            // v(t) = j * t_remaining² / 2, smooth end
-            speed = _scurveJerk * timeRemaining * timeRemaining / 2.0f;
-            break;
-        }
-    }
-    
-    // Clamp and apply direction
-    if (speed < 0) speed = 0;
-    if (speed > _scurvePeakSpeed) speed = _scurvePeakSpeed;
-    
-    return speed * _moveDirection;
 }
 
 void DCMotorDriver::applySpeed(float speed) {
@@ -507,7 +282,7 @@ void DCMotorDriver::setSpeed(float speed) {
     _moving = (speed != 0);
     
     // If no acceleration, apply immediately
-    if (_profile.acceleration <= 0) {
+    if (_accelerationRate <= 0) {
         _currentSpeed = speed;
         applySpeed(speed);
     }
@@ -536,8 +311,8 @@ void DCMotorDriver::setMicrosteps(uint16_t microsteps) {
     Serial.println("DC Motor: Microstepping not applicable");
 }
 
-void DCMotorDriver::setAccelerationProfile(const AccelerationProfile& profile) {
-    _profile = profile;
+void DCMotorDriver::setAcceleration(float accelStepsPerSecondSquared) {
+    _accelerationRate = accelStepsPerSecondSquared;
 }
 
 // =============================================================================

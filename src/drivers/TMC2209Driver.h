@@ -31,7 +31,7 @@
 #include <Arduino.h>
 #include <TMCStepper.h>
 #include "IMotorDriver.h"
-#include "MCPWMStepper.h"
+#include "FastAccelStepperWrapper.h"
 #include "../config/PinConfig.h"
 
 /**
@@ -87,7 +87,7 @@ public:
     void setMaxSpeed(float stepsPerSecond) override;
     void setCurrent(uint16_t runMA, uint16_t holdMA = 0) override;
     void setMicrosteps(uint16_t microsteps) override;
-    void setAccelerationProfile(const AccelerationProfile& profile) override;
+    void setAcceleration(float accelStepsPerSecondSquared) override;
     
     int32_t getPosition() const override;
     void setPosition(int32_t position) override;
@@ -173,7 +173,7 @@ private:
     TMC2209Stepper* _driver;
     
     // Hardware PWM stepper
-    MCPWMStepper _mcpwmStepper;
+    FastAccelStepperWrapper _mcpwmStepper;  // Using FastAccelStepper library now
     
     // UART mode flag (false = Step/Dir fallback)
     bool _uartMode;
@@ -183,47 +183,22 @@ private:
     int32_t _position;
     int32_t _targetPosition;
     bool _moving;
-    uint32_t _lastFreqUpdate;  // Track last frequency update time
     
     // Configuration
     uint16_t _runCurrentMA;
     uint16_t _holdCurrentMA;
     uint16_t _microsteps;
     float _maxSpeed;
-    AccelerationProfile _profile;
+    float _acceleration;  // Steps/s² for FastAccelStepper
     
-    // Motion state (for acceleration)
+    // Current speed tracking (for status reporting)
     float _currentSpeed;
-    uint32_t _lastStepTime;
-    uint32_t _stepInterval;  // microseconds between steps
-    
-    // Trapezoidal/S-Curve motion planning
-    int32_t _startPosition;      // Position when move started
-    int32_t _accelSteps;         // Steps in acceleration phase
-    int32_t _decelSteps;         // Steps in deceleration phase
-    int32_t _totalMoveSteps;     // Total steps in current move
-    bool _isTriangular;          // True if no cruise phase (accel → decel)
-    int8_t _moveDirection;       // +1 or -1
-    
-    // S-Curve specific: 7 segment positions (cumulative step counts from start)
-    // Segments: J+(0), ConstA(1), J-(2), Cruise(3), J-(4), ConstD(5), J+(6), End
-    int32_t _scurveSegmentEnd[7];  // Step position where each segment ends
-    float _scurveVelocity[8];      // Velocity at each segment boundary
-    float _scurveAccel[7];         // Acceleration at start of each segment
-    float _jerkSign[7];            // Jerk sign for each segment (0, +j, or -j)
     
     // StallGuard
     uint8_t _stallThreshold;
     
     // Internal methods
     void configureDriver();
-    void updateHardwareFrequency();  // Update MCPWM frequency based on current speed
     uint8_t microStepsToMRES(uint16_t ms);
     uint16_t mrestoMicrosteps(uint8_t mres);
-    
-    // Motion planning
-    void planTrapezoidalMotion();
-    void planSCurveMotion();
-    void updateTrapezoidalSpeed();
-    void updateSCurveSpeed();
 };

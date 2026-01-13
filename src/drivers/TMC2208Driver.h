@@ -45,7 +45,7 @@
 #include <TMCStepper.h>
 #include "IMotorDriver.h"
 #include "../config/PinConfig.h"
-#include "MCPWMStepper.h"
+#include "FastAccelStepperWrapper.h"
 
 /**
  * @brief TMC2208 driver implementation with UART control (fallback to Step/Dir)
@@ -99,7 +99,7 @@ public:
     void setMaxSpeed(float stepsPerSecond) override;
     void setCurrent(uint16_t runMA, uint16_t holdMA = 0) override;
     void setMicrosteps(uint16_t microsteps) override;
-    void setAccelerationProfile(const AccelerationProfile& profile) override;
+    void setAcceleration(float accelStepsPerSecondSquared) override;
     
     int32_t getPosition() const override;
     void setPosition(int32_t position) override;
@@ -159,7 +159,7 @@ private:
     TMC2208Stepper* _driver;
     
     // MCPWM stepper for hardware PWM
-    MCPWMStepper _mcpwmStepper;
+    FastAccelStepperWrapper _mcpwmStepper;  // Using FastAccelStepper library now
     
     // UART mode flag (false = Step/Dir fallback)
     bool _uartMode;
@@ -169,41 +169,19 @@ private:
     int32_t _position;
     int32_t _targetPosition;
     bool _moving;
-    uint32_t _lastFreqUpdate;  // Track last frequency update time
     
     // Configuration
     uint16_t _runCurrentMA;
     uint16_t _holdCurrentMA;
     uint16_t _microsteps;
     float _maxSpeed;
-    AccelerationProfile _profile;
+    float _acceleration;  // Steps/s² for FastAccelStepper
     
-    // Motion state (for acceleration)
+    // Current speed tracking (for status reporting)
     float _currentSpeed;
-    uint32_t _lastStepTime;
-    uint32_t _stepInterval;
-    
-    // Trapezoidal/S-Curve motion planning
-    int32_t _startPosition;
-    int32_t _accelSteps;
-    int32_t _decelSteps;
-    int32_t _totalMoveSteps;
-    bool _isTriangular;
-    int8_t _moveDirection;
-    
-    // S-Curve specific
-    int32_t _scurveSegmentEnd[7];
-    float _scurveVelocity[8];
-    float _scurveAccel[7];
-    float _jerkSign[7];
     
     // Internal methods
     void configureDriver();  // UART configuration
-    void updateHardwareFrequency();
     uint8_t microStepsToMRES(uint16_t ms);
     uint16_t mrestoMicrosteps(uint8_t mres);
-    void planTrapezoidalMotion();
-    void planSCurveMotion();
-    void updateTrapezoidalSpeed();
-    void updateSCurveSpeed();
 };

@@ -2,23 +2,18 @@
  * =============================================================================
  * TMC2208 DRIVER - Implementation
  * =============================================================================
- * 
- * UART-controlled stepper driver with Step/Dir fallback mode.
- * Uses TMCStepper library (TMC2208Stepper class).
+ * FastAccelStepper-powered version - all motion planning delegated to library
  * 
  * Key differences from TMC2209:
  *   - NO StallGuard (sensorless homing not available)
  *   - NO CoolStep (automatic current reduction)
  *   - Same UART configuration for current, microstepping, StealthChop
- * 
- * =============================================================================
  */
 
 #include "TMC2208Driver.h"
-#include "../core/MotionMath.h"
 
 // =============================================================================
-// CONSTRUCTORS
+// CONSTRUCTOR / DESTRUCTOR
 // =============================================================================
 
 TMC2208Driver::TMC2208Driver()
@@ -47,28 +42,8 @@ TMC2208Driver::TMC2208Driver(HardwareSerial* serial, uint8_t txPin, uint8_t rxPi
     , _holdCurrentMA(DefaultMotorConfig::STEPPER_HOLD_CURRENT)
     , _microsteps(DefaultMotorConfig::STEPPER_MICROSTEPS)
     , _maxSpeed(DefaultMotorConfig::STEPPER_MAX_SPEED)
-    , _currentSpeed(0)
-    , _lastStepTime(0)
-    , _stepInterval(1000)
-    , _startPosition(0)
-    , _accelSteps(0)
-    , _decelSteps(0)
-    , _totalMoveSteps(0)
-    , _isTriangular(false)
-    , _moveDirection(1) {
-    
-    // Initialize with default constant velocity profile
-    _profile = AccelerationProfile::constant(_maxSpeed);
-    
-    // Initialize S-curve arrays
-    for (int i = 0; i < 7; i++) {
-        _scurveSegmentEnd[i] = 0;
-        _scurveAccel[i] = 0;
-        _jerkSign[i] = 0;
-    }
-    for (int i = 0; i < 8; i++) {
-        _scurveVelocity[i] = 0;
-    }
+    , _acceleration(1000.0f)  // Default acceleration
+    , _currentSpeed(0) {
 }
 
 TMC2208Driver::~TMC2208Driver() {
@@ -76,7 +51,6 @@ TMC2208Driver::~TMC2208Driver() {
         delete _driver;
         _driver = nullptr;
     }
-    disable();
 }
 
 // =============================================================================
@@ -86,23 +60,26 @@ TMC2208Driver::~TMC2208Driver() {
 bool TMC2208Driver::init() {
     Serial.println("TMC2208 Driver: Initializing...");
     
-    // Configure control pins
+    // Initialize Enable pin
     pinMode(_enPin, OUTPUT);
-    pinMode(_dirPin, OUTPUT);
+    disable();  // Start disabled
     
-    // Initialize MCPWM for step pin
+    // Initialize direction pin (MCPWM will also configure it)
+    pinMode(_dirPin, OUTPUT);
+    digitalWrite(_dirPin, LOW);
+    
+    // Initialize MCPWM hardware stepper with FastAccelStepper
     if (!_mcpwmStepper.init((gpio_num_t)_stepPin, (gpio_num_t)_dirPin)) {
-        Serial.println("TMC2208: ⚠️ MCPWM initialization failed!");
+        Serial.println("TMC2208 Driver: MCPWM initialization failed!");
         return false;
     }
+    Serial.println("TMC2208 Driver: MCPWM initialized successfully");
     
-    // Start disabled
-    digitalWrite(_enPin, HIGH);  // HIGH = disabled;
+    // Set default speed and acceleration for FastAccelStepper
+    _mcpwmStepper.setFrequency(_maxSpeed);
+    _mcpwmStepper.setAcceleration(_acceleration);
     
     _enabled = false;
-    _position = 0;
-    _targetPosition = 0;
-    _moving = false;
     
     // Initialize UART
     _serial->begin(TMC_UART_BAUD, SERIAL_8N1, _rxPin, _txPin);
@@ -180,6 +157,25 @@ void TMC2208Driver::reconfigure() {
     }
 }
 
+void TMC2208Driver::setStepDirMode(bool enabled) {
+    if (enabled) {
+        _uartMode = false;
+        Serial.println("TMC2208: Switched to Step/Dir only mode");
+        Serial.println("  - Microstepping: determined by MS1/MS2 pins");
+        Serial.println("  - Current limit: determined by Vref potentiometer");
+        Serial.println("  - Runtime configuration: NOT available");
+    } else {
+        // Try to re-enable UART
+        if (testConnection()) {
+            _uartMode = true;
+            configureDriver();
+            Serial.println("TMC2208: UART mode re-enabled ✓");
+        } else {
+            Serial.println("TMC2208: UART still unavailable - staying in Step/Dir mode");
+        }
+    }
+}
+
 // =============================================================================
 // ENABLE / DISABLE
 // =============================================================================
@@ -193,6 +189,7 @@ void TMC2208Driver::disable() {
     digitalWrite(_enPin, HIGH);
     _enabled = false;
     _moving = false;
+    _mcpwmStepper.stop();
 }
 
 bool TMC2208Driver::isEnabled() const {
@@ -200,352 +197,63 @@ bool TMC2208Driver::isEnabled() const {
 }
 
 // =============================================================================
-// MOTION CONTROL
+// MOTION CONTROL - Delegated to FastAccelStepper
 // =============================================================================
 
 void TMC2208Driver::move(int32_t steps) {
+    if (!_enabled) return;
     if (steps == 0) return;
     
-    // Store move parameters
-    _startPosition = _position;
-    _targetPosition = _position + steps;
-    _totalMoveSteps = abs(steps);
-    _moveDirection = steps > 0 ? 1 : -1;
-    
-    // Set direction via MCPWM stepper
-    _mcpwmStepper.setDirection(steps > 0);
-    
-    // Plan motion based on profile type
-    if (_profile.type == VelocityProfileType::CONSTANT) {
-        _accelSteps = 0;
-        _decelSteps = 0;
-        _currentSpeed = _profile.maxSpeed;
-    } 
-    else if (_profile.type == VelocityProfileType::TRAPEZOIDAL) {
-        planTrapezoidalMotion();
-    }
-    else if (_profile.type == VelocityProfileType::S_CURVE) {
-        planSCurveMotion();
-    }
-    
+    // FastAccelStepper handles all motion planning
+    _mcpwmStepper.moveBy(steps);
     _moving = true;
-    _lastStepTime = micros();
-    _mcpwmStepper.start();
+    _targetPosition = _position + steps;
 }
 
 void TMC2208Driver::moveTo(int32_t position) {
-    if (position < 0) position = 0;
-    int32_t delta = position - _position;
-    move(delta);
+    if (!_enabled) return;
+    if (position < 0) position = 0;  // Only positive positions
+    
+    // FastAccelStepper handles all motion planning
+    _mcpwmStepper.moveTo(position);
+    _moving = true;
+    _targetPosition = position;
 }
 
 void TMC2208Driver::stop() {
-    _moving = false;
-    _currentSpeed = 0;
+    // Controlled stop with deceleration
     _mcpwmStepper.stop();
+    _moving = false;
+    _targetPosition = _mcpwmStepper.getPosition();
 }
 
 void TMC2208Driver::emergencyStop() {
+    // Emergency stop - immediate halt
+    _mcpwmStepper.emergencyStop();
     _moving = false;
-    _currentSpeed = 0;
-    _mcpwmStepper.stop();
+    _position = _mcpwmStepper.getPosition();
+    _targetPosition = _position;
 }
 
 bool TMC2208Driver::isMoving() const {
-    return _moving;
+    // Check FastAccelStepper's state
+    return _mcpwmStepper.isMoving();
 }
 
 void TMC2208Driver::update() {
-    if (!_moving || !_enabled) return;
-    
-    uint32_t now = micros();
-    
-    // Update speed profile (acceleration/deceleration) at reasonable rate
-    // This determines what _currentSpeed should be, but doesn't update hardware yet
-    static uint32_t lastProfileUpdate = 0;
-    if (now - lastProfileUpdate >= 5000) {  // Update profile every 5ms
-        lastProfileUpdate = now;
+    // FastAccelStepper runs in background via interrupts
+    // Just update our position tracking
+    if (_enabled) {
+        _position = _mcpwmStepper.getPosition();
+        _moving = _mcpwmStepper.isMoving();
         
-        // Calculate steps done so far (based on time since move started)
-        float elapsedSec = (now - _lastStepTime) / 1000000.0f;
-        int32_t estimatedSteps = (int32_t)(_currentSpeed * elapsedSec);
-        
-        if (estimatedSteps > 0) {
-            _position += _moveDirection * estimatedSteps;
-            _lastStepTime = now;
-        }
-        
-        // Check if we've reached target
-        if (abs(_targetPosition - _position) <= 10) {
-            _position = _targetPosition;
-            _moving = false;
+        // Update current speed for status reporting
+        if (_moving) {
+            _currentSpeed = _mcpwmStepper.getCurrentSpeed();
+        } else {
             _currentSpeed = 0;
-            _mcpwmStepper.stop();
-            return;
         }
-        
-        // Update speed based on profile type (changes _currentSpeed)
-        if (_profile.type == VelocityProfileType::TRAPEZOIDAL) {
-            updateTrapezoidalSpeed();
-        } else if (_profile.type == VelocityProfileType::S_CURVE) {
-            updateSCurveSpeed();
-        }
-        
-        // Update hardware frequency only if speed changed significantly
-        updateHardwareFrequency();
     }
-}
-
-void TMC2208Driver::updateHardwareFrequency() {
-    // Update MCPWM frequency - called at controlled rate (not every loop)
-    float speed = _currentSpeed;
-    if (speed < 10.0f) speed = 10.0f;  // Minimum 10 steps/sec (MCPWM limit)
-    if (speed > 50000.0f) speed = 50000.0f;  // Maximum safe frequency
-    
-    _mcpwmStepper.setFrequency(speed);
-    _lastFreqUpdate = micros();
-}
-
-// =============================================================================
-// MOTION PLANNING - TRAPEZOIDAL
-// =============================================================================
-
-void TMC2208Driver::planTrapezoidalMotion() {
-    float accel = _profile.acceleration;
-    float maxSpeed = _profile.maxSpeed;
-    
-    if (accel <= 0) {
-        _accelSteps = 0;
-        _decelSteps = 0;
-        _currentSpeed = maxSpeed;
-        _isTriangular = false;
-        return;
-    }
-    
-    int32_t stepsToMaxSpeed = MotionMath::calculateStepsToMaxSpeed(maxSpeed, accel);
-    _isTriangular = MotionMath::isTriangularProfile(_totalMoveSteps, maxSpeed, accel);
-    
-    if (_isTriangular) {
-        _accelSteps = _totalMoveSteps / 2;
-        _decelSteps = _totalMoveSteps - _accelSteps;
-    } else {
-        _accelSteps = stepsToMaxSpeed;
-        _decelSteps = stepsToMaxSpeed;
-    }
-    
-    _currentSpeed = 50.0f;
-}
-
-void TMC2208Driver::updateTrapezoidalSpeed() {
-    int32_t stepsDone = abs(_position - _startPosition);
-    int32_t stepsRemaining = abs(_targetPosition - _position);
-    
-    _currentSpeed = MotionMath::calculateTrapezoidalVelocity(
-        stepsDone,
-        stepsRemaining,
-        _accelSteps,
-        _decelSteps,
-        _profile.acceleration,
-        _profile.maxSpeed,
-        50.0f  // minSpeed
-    );
-    
-    // Hardware frequency update happens in update()
-}
-
-// =============================================================================
-// MOTION PLANNING - S-CURVE (7-segment)
-// =============================================================================
-
-void TMC2208Driver::planSCurveMotion() {
-    // 7-segment S-curve profile:
-    // Seg 0: Jerk+ (acceleration increasing from 0)
-    // Seg 1: Constant acceleration (at max accel)
-    // Seg 2: Jerk- (acceleration decreasing to 0, reaching max velocity)
-    // Seg 3: Cruise (constant velocity)
-    // Seg 4: Jerk- (acceleration decreasing, starting decel)
-    // Seg 5: Constant deceleration (at max decel)
-    // Seg 6: Jerk+ (acceleration increasing back to 0, stopping)
-    
-    float jerk = _profile.jerk;
-    float maxAccel = _profile.acceleration;
-    float maxSpeed = _profile.maxSpeed;
-    float minSpeed = 50.0f;  // Minimum speed to prevent stalling
-    
-    if (jerk <= 0 || maxAccel <= 0) {
-        planTrapezoidalMotion();
-        return;
-    }
-    
-    // Time to reach max acceleration with given jerk: t_j = a_max / j
-    float t_j = MotionMath::calculateJerkPhaseTime(maxAccel, jerk);
-    
-    // Distance covered during one jerk phase: s = j * t³ / 6
-    float jerkPhaseDist = MotionMath::calculateJerkPhaseDistance(jerk, t_j);
-    
-    // Velocity gained during one jerk phase: v = j * t² / 2  
-    float jerkPhaseVel = MotionMath::calculateJerkPhaseVelocity(jerk, t_j);
-    
-    // Velocity gained during constant accel phase to reach max speed
-    float constAccelVel = maxSpeed - minSpeed - 2.0f * jerkPhaseVel;
-    
-    float constAccelDist = 0;
-    float t_a = 0;
-    
-    if (constAccelVel > 0) {
-        t_a = constAccelVel / maxAccel;
-        float v_at_seg1_start = minSpeed + jerkPhaseVel;
-        constAccelDist = v_at_seg1_start * t_a + 0.5f * maxAccel * t_a * t_a;
-    } else {
-        // Short move or low max speed - scale down the profile
-        float velocityBudget = maxSpeed - minSpeed;
-        if (velocityBudget <= 0) {
-            _profile.type = VelocityProfileType::CONSTANT;
-            _accelSteps = 0;
-            _decelSteps = 0;
-            _currentSpeed = maxSpeed > minSpeed ? maxSpeed : minSpeed;
-            _isTriangular = false;
-            return;
-        }
-        jerkPhaseVel = velocityBudget / 2.0f;
-        t_j = sqrtf(2.0f * jerkPhaseVel / jerk);
-        jerkPhaseDist = MotionMath::calculateJerkPhaseDistance(jerk, t_j);
-        constAccelVel = 0;
-        constAccelDist = 0;
-    }
-    
-    // Distance for segment 2
-    float v_at_seg2_start = minSpeed + jerkPhaseVel + constAccelVel;
-    float seg2Dist = v_at_seg2_start * t_j + 0.5f * maxAccel * t_j * t_j - jerk * t_j * t_j * t_j / 6.0f;
-    
-    float accelSideDist = jerkPhaseDist + constAccelDist + seg2Dist;
-    float decelSideDist = accelSideDist;
-    float totalAccelDecelDist = accelSideDist + decelSideDist;
-    float cruiseDist = (float)_totalMoveSteps - totalAccelDecelDist;
-    
-    if (cruiseDist < 0) {
-        // Scale down the profile for short moves
-        float availablePerSide = (float)_totalMoveSteps / 2.0f;
-        float scaleFactor = availablePerSide / accelSideDist;
-        
-        if (scaleFactor < 0.1f) {
-            planTrapezoidalMotion();
-            return;
-        }
-        
-        jerkPhaseVel *= scaleFactor;
-        constAccelVel *= scaleFactor;
-        jerkPhaseDist *= scaleFactor * scaleFactor * scaleFactor;
-        constAccelDist *= scaleFactor * scaleFactor;
-        seg2Dist = availablePerSide - jerkPhaseDist - constAccelDist;
-        accelSideDist = availablePerSide;
-        decelSideDist = availablePerSide;
-        cruiseDist = 0;
-        maxSpeed = minSpeed + 2.0f * jerkPhaseVel + constAccelVel;
-    }
-    
-    int32_t pos = 0;
-    
-    // Segment 0: Jerk+ phase
-    _scurveSegmentEnd[0] = pos + (int32_t)jerkPhaseDist;
-    _scurveVelocity[0] = minSpeed;
-    _scurveVelocity[1] = minSpeed + jerkPhaseVel;
-    _scurveAccel[0] = 0;
-    _jerkSign[0] = jerk;
-    pos = _scurveSegmentEnd[0];
-    
-    // Segment 1: Constant acceleration
-    _scurveSegmentEnd[1] = pos + (int32_t)constAccelDist;
-    _scurveVelocity[2] = minSpeed + jerkPhaseVel + constAccelVel;
-    _scurveAccel[1] = maxAccel;
-    _jerkSign[1] = 0;
-    pos = _scurveSegmentEnd[1];
-    
-    // Segment 2: Jerk- phase
-    _scurveSegmentEnd[2] = pos + (int32_t)seg2Dist;
-    _scurveVelocity[3] = maxSpeed;
-    _scurveAccel[2] = maxAccel;
-    _jerkSign[2] = -jerk;
-    pos = _scurveSegmentEnd[2];
-    
-    // Segment 3: Cruise
-    _scurveSegmentEnd[3] = pos + (int32_t)cruiseDist;
-    _scurveVelocity[4] = maxSpeed;
-    _scurveAccel[3] = 0;
-    _jerkSign[3] = 0;
-    pos = _scurveSegmentEnd[3];
-    
-    // Segment 4: Jerk- phase (starting decel)
-    _scurveSegmentEnd[4] = pos + (int32_t)seg2Dist;
-    _scurveVelocity[5] = minSpeed + jerkPhaseVel + constAccelVel;
-    _scurveAccel[4] = 0;
-    _jerkSign[4] = -jerk;
-    pos = _scurveSegmentEnd[4];
-    
-    // Segment 5: Constant deceleration
-    _scurveSegmentEnd[5] = pos + (int32_t)constAccelDist;
-    _scurveVelocity[6] = minSpeed + jerkPhaseVel;
-    _scurveAccel[5] = -maxAccel;
-    _jerkSign[5] = 0;
-    pos = _scurveSegmentEnd[5];
-    
-    // Segment 6: Jerk+ phase (stopping)
-    _scurveSegmentEnd[6] = _totalMoveSteps;
-    _scurveVelocity[7] = minSpeed;
-    _scurveAccel[6] = -maxAccel;
-    _jerkSign[6] = jerk;
-    
-    _currentSpeed = minSpeed;
-    _isTriangular = false;
-}
-
-void TMC2208Driver::updateSCurveSpeed() {
-    int32_t stepsDone = abs(_position - _startPosition);
-    
-    int segment = 0;
-    for (int i = 0; i < 7; i++) {
-        if (stepsDone < _scurveSegmentEnd[i]) {
-            segment = i;
-            break;
-        }
-        if (i == 6) segment = 6;
-    }
-    
-    int32_t segmentStart = (segment == 0) ? 0 : _scurveSegmentEnd[segment - 1];
-    int32_t stepsInSegment = stepsDone - segmentStart;
-    int32_t segmentLength = _scurveSegmentEnd[segment] - segmentStart;
-    
-    if (segmentLength <= 0) {
-        _currentSpeed = _scurveVelocity[segment];
-        // Hardware frequency update happens in update()
-        return;
-    }
-    
-    float v0 = _scurveVelocity[segment];
-    int nextSeg = min(segment + 1, 7);
-    float v1 = _scurveVelocity[nextSeg];
-    float a0 = _scurveAccel[segment];
-    float j = _jerkSign[segment];
-    
-    // Use proper kinematic equations based on segment type
-    if (j != 0) {
-        // Jerk phase: use smooth S-curve interpolation
-        float progress = (float)stepsInSegment / (float)segmentLength;
-        _currentSpeed = MotionMath::interpolateJerkPhaseVelocity(v0, v1, progress);
-    }
-    else if (a0 != 0) {
-        // Constant acceleration phase: v² = v0² + 2*a*s
-        _currentSpeed = MotionMath::calculateConstantAccelVelocity(v0, a0, (float)stepsInSegment);
-    }
-    else {
-        // Cruise phase: constant velocity
-        _currentSpeed = v0;
-    }
-    
-    if (_currentSpeed < 50.0f) _currentSpeed = 50.0f;
-    if (_currentSpeed > _profile.maxSpeed) _currentSpeed = _profile.maxSpeed;
-    
-    // Hardware frequency update happens in update()
 }
 
 // =============================================================================
@@ -555,16 +263,26 @@ void TMC2208Driver::updateSCurveSpeed() {
 void TMC2208Driver::setMaxSpeed(float stepsPerSecond) {
     if (stepsPerSecond <= 0) stepsPerSecond = 1;
     _maxSpeed = stepsPerSecond;
-    _profile.maxSpeed = stepsPerSecond;
+    
+    // Set FastAccelStepper frequency
+    _mcpwmStepper.setFrequency(stepsPerSecond);
+}
+
+void TMC2208Driver::setAcceleration(float accelStepsPerSecondSquared) {
+    if (accelStepsPerSecondSquared <= 0) accelStepsPerSecondSquared = 100;
+    _acceleration = accelStepsPerSecondSquared;
+    
+    // Set FastAccelStepper acceleration
+    _mcpwmStepper.setAcceleration(accelStepsPerSecondSquared);
 }
 
 void TMC2208Driver::setCurrent(uint16_t runMA, uint16_t holdMA) {
     _runCurrentMA = runMA;
-    _holdCurrentMA = holdMA > 0 ? holdMA : runMA / 2;
+    _holdCurrentMA = holdMA;
     
     if (_uartMode && _driver != nullptr) {
         _driver->rms_current(_runCurrentMA);
-        _driver->ihold(_holdCurrentMA * 31 / _runCurrentMA);
+        _driver->ihold(_holdCurrentMA > 0 ? (_holdCurrentMA * 31 / _runCurrentMA) : 0);
         Serial.print("TMC2208: Current set to ");
         Serial.print(_runCurrentMA);
         Serial.println(" mA RMS");
@@ -592,16 +310,17 @@ void TMC2208Driver::setMicrosteps(uint16_t microsteps) {
     _microsteps = microsteps;
     
     if (_uartMode && _driver != nullptr) {
-        // Ensure microstep register select is enabled (allows UART control of microsteps)
+        // CRITICAL: Ensure UART controls microsteps (not MS1/MS2 pins)
         _driver->mstep_reg_select(true);
         
+        // Set MRES in CHOPCONF register
         uint8_t mres = microStepsToMRES(microsteps);
         uint32_t chopconf = _driver->CHOPCONF();
         chopconf = (chopconf & 0xF0FFFFFF) | ((uint32_t)mres << 24);
         _driver->CHOPCONF(chopconf);
         
         // Read back to verify
-        delay(10);  // Small delay for register to update
+        delay(10);
         uint32_t readback = _driver->CHOPCONF();
         uint8_t actualMres = (readback >> 24) & 0x0F;
         
@@ -617,83 +336,6 @@ void TMC2208Driver::setMicrosteps(uint16_t microsteps) {
     }
 }
 
-void TMC2208Driver::setAccelerationProfile(const AccelerationProfile& profile) {
-    _profile = profile;
-    _maxSpeed = profile.maxSpeed;
-}
-
-// =============================================================================
-// TMC2208-SPECIFIC METHODS
-// =============================================================================
-
-void TMC2208Driver::setStealthChop(bool enable) {
-    if (_uartMode && _driver != nullptr) {
-        _driver->en_spreadCycle(!enable);  // false = StealthChop, true = SpreadCycle
-        Serial.print("TMC2208: ");
-        Serial.println(enable ? "StealthChop enabled (silent)" : "SpreadCycle enabled (high torque)");
-    } else {
-        Serial.println("TMC2208: Cannot change mode in Step/Dir fallback");
-    }
-}
-
-void TMC2208Driver::setPWMAutoscale(bool enable) {
-    if (_uartMode && _driver != nullptr) {
-        _driver->pwm_autoscale(enable);
-        Serial.print("TMC2208: PWM autoscale ");
-        Serial.println(enable ? "ENABLED (current scales with load)" : "DISABLED (full current always)");
-        
-        if (!enable) {
-            Serial.println("  Note: Motor will draw full current even when idle - may run hotter");
-        }
-    } else {
-        Serial.println("TMC2208: Cannot set PWM autoscale in Step/Dir mode");
-    }
-}
-
-void TMC2208Driver::setStepDirMode(bool enabled) {
-    if (enabled) {
-        _uartMode = false;
-        Serial.println("TMC2208: Switched to Step/Dir only mode");
-        Serial.println("  - Microstepping: determined by MS1/MS2 pins");
-        Serial.println("  - Current limit: determined by Vref potentiometer");
-        Serial.println("  - Runtime configuration: NOT available");
-    } else {
-        // Try to re-enable UART
-        if (testConnection()) {
-            _uartMode = true;
-            configureDriver();
-            Serial.println("TMC2208: UART mode re-enabled ✓");
-        } else {
-            Serial.println("TMC2208: UART still unavailable - staying in Step/Dir mode");
-        }
-    }
-}
-
-uint8_t TMC2208Driver::microStepsToMRES(uint16_t ms) {
-    return MotionMath::microStepsToMRES(ms);
-}
-
-uint16_t TMC2208Driver::mrestoMicrosteps(uint8_t mres) {
-    return MotionMath::mresToMicrosteps(mres);
-}
-
-// =============================================================================
-// CONNECTION TEST
-// =============================================================================
-
-bool TMC2208Driver::testConnection() {
-    if (_driver == nullptr) return false;
-    
-    // Read IOIN register - should return a valid value
-    uint32_t ioin = _driver->IOIN();
-    
-    // If version field is 0 or 0xFF, likely no connection
-    uint8_t version = (ioin >> 24) & 0xFF;
-    
-    // TMC2208 should return version 0x20
-    return (version == 0x20);
-}
-
 // =============================================================================
 // POSITION
 // =============================================================================
@@ -704,18 +346,20 @@ int32_t TMC2208Driver::getPosition() const {
 
 void TMC2208Driver::setPosition(int32_t position) {
     _position = position;
+    _mcpwmStepper.setPosition(position);
 }
 
 void TMC2208Driver::home(int8_t direction) {
     // TMC2208 has no StallGuard - homing requires external limit switch
-    Serial.println("TMC2208: Homing not supported (no StallGuard)");
-    Serial.println("  Use external limit switch for homing");
+    Serial.println("TMC2208: Homing NOT supported (no StallGuard)");
+    Serial.println("         Use external limit switches for homing");
     _position = 0;
     _targetPosition = 0;
+    setPosition(0);
 }
 
 // =============================================================================
-// STATUS
+// DIAGNOSTICS
 // =============================================================================
 
 MotorStatus TMC2208Driver::getStatus() {
@@ -781,6 +425,12 @@ void TMC2208Driver::printDiagnostics() {
     if (_uartMode && _driver != nullptr) {
         Serial.println("\n  --- UART Diagnostics ---");
         
+        // Connection test
+        Serial.print("  Connection:   ");
+        uint8_t connResult = _driver->test_connection();
+        Serial.println(connResult == 0 ? "OK ✓" : "FAILED ✗");
+        
+        // Registers
         uint32_t drv_status = _driver->DRV_STATUS();
         uint32_t chopconf = _driver->CHOPCONF();
         
@@ -820,4 +470,72 @@ void TMC2208Driver::printDiagnostics() {
     }
     
     Serial.println("\n═══════════════════════════════════════════════════════════════\n");
+}
+bool TMC2208Driver::testConnection() {
+    if (_driver == nullptr) return false;
+    
+    // Read IOIN register - should return a valid value
+    uint32_t ioin = _driver->IOIN();
+    
+    // If version field is 0 or 0xFF, likely no connection
+    uint8_t version = (ioin >> 24) & 0xFF;
+    
+    // TMC2208 should return version 0x20
+    return (version == 0x20);
+}
+
+// =============================================================================
+// TMC2208-SPECIFIC METHODS
+// =============================================================================
+
+void TMC2208Driver::setStealthChop(bool enable) {
+    if (_uartMode && _driver != nullptr) {
+        _driver->en_spreadCycle(!enable);  // false = StealthChop, true = SpreadCycle
+        Serial.print("TMC2208: ");
+        Serial.println(enable ? "StealthChop enabled (silent)" : "SpreadCycle enabled (high torque)");
+    } else {
+        Serial.println("TMC2208: Cannot change mode in Step/Dir fallback");
+    }
+}
+
+void TMC2208Driver::setPWMAutoscale(bool enable) {
+    if (_uartMode && _driver != nullptr) {
+        _driver->pwm_autoscale(enable);
+        Serial.print("TMC2208: PWM autoscale ");
+        Serial.println(enable ? "ENABLED (current scales with load)" : "DISABLED (full current always)");
+        
+        if (!enable) {
+            Serial.println("  Note: Motor will draw full current even when idle - may run hotter");
+        }
+    } else {
+        Serial.println("TMC2208: Cannot set PWM autoscale in Step/Dir mode");
+    }
+}
+
+// =============================================================================
+// HELPER METHODS - Microstep Conversion
+// =============================================================================
+
+uint8_t TMC2208Driver::microStepsToMRES(uint16_t ms) {
+    // Convert microsteps to MRES value
+    // MRES = 8 - log2(microsteps)
+    switch (ms) {
+        case 256: return 0;
+        case 128: return 1;
+        case 64:  return 2;
+        case 32:  return 3;
+        case 16:  return 4;
+        case 8:   return 5;
+        case 4:   return 6;
+        case 2:   return 7;
+        case 1:   return 8;  // Fullstep (not recommended)
+        default:  return 4;  // Default to 16 microsteps
+    }
+}
+
+uint16_t TMC2208Driver::mrestoMicrosteps(uint8_t mres) {
+    // Convert MRES value to microsteps
+    // microsteps = 256 >> MRES
+    if (mres > 8) mres = 8;
+    return 256 >> mres;
 }

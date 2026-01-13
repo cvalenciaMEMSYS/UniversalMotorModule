@@ -111,3 +111,4 @@ site/
 # Add your custom ignores here
 # credentials.h
 # secrets.h
+/FastAccelStepper

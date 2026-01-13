@@ -92,7 +92,7 @@ public:
     
     void setCurrent(uint16_t runMA, uint16_t holdMA = 0) override;
     void setMicrosteps(uint16_t microsteps) override;
-    void setAccelerationProfile(const AccelerationProfile& profile) override;
+    void setAcceleration(float accelStepsPerSecondSquared) override;
     
     int32_t getPosition() const override;
     void setPosition(int32_t position) override;
@@ -151,24 +151,12 @@ private:
     uint32_t _moveDuration;
     int8_t _moveDirection;
     
-    // Acceleration ramping
-    AccelerationProfile _profile;
+    // Acceleration ramping (simple for DC motors)
+    float _accelerationRate;  // Acceleration in normalized speed units per second
     float _maxSpeedLimit;     // Max allowed speed (0-1.0)
     uint32_t _lastUpdateTime;
-    
-    // S-curve time-based profile (for DC motor)
-    // These store timing for the 7 segments when using S-curve
-    bool _usingSCurve;                 // True when executing S-curve profile
-    float _scurveStartSpeed;           // Speed at move start
-    float _scurvePeakSpeed;            // Target peak speed
-    uint32_t _scurveSegmentTime[7];    // Duration of each segment in ms
-    uint32_t _scurveTotalTime;         // Total move time in ms
-    float _scurveJerk;                 // Jerk value for S-curve
-    float _scurveMaxAccel;             // Max acceleration for S-curve
     
     // Internal methods
     void applySpeed(float speed);
     void updateRamping();
-    void planTimedSCurve(uint32_t duration, float targetSpeed);
-    float computeSCurveSpeed(uint32_t elapsedMs);
 };

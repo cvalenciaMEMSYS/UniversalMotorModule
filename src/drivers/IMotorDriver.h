@@ -13,7 +13,7 @@
 #pragma once
 
 #include <Arduino.h>
-#include "../core/AccelerationProfile.h"
+// Note: AccelerationProfile.h removed - now handled by FastAccelStepper library
 
 // =============================================================================
 // MOTOR TYPE ENUMERATION
@@ -247,10 +247,13 @@ public:
     virtual void setMicrosteps(uint16_t microsteps) = 0;
     
     /**
-     * @brief Set acceleration profile
-     * @param profile AccelerationProfile with type and parameters
+     * @brief Set acceleration rate
+     * @param accelStepsPerSecondSquared Acceleration in steps/s²
+     * 
+     * Note: Acceleration profile is now managed internally by FastAccelStepper.
+     * This method sets only the acceleration rate.
      */
-    virtual void setAccelerationProfile(const AccelerationProfile& profile) = 0;
+    virtual void setAcceleration(float accelStepsPerSecondSquared) = 0;
     
     // =========================================================================
     // Position
