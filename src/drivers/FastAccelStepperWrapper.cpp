@@ -11,8 +11,11 @@ FastAccelStepperWrapper::FastAccelStepperWrapper()
     , _stepper(nullptr)
     , _stepPin(GPIO_NUM_NC)
     , _dirPin(GPIO_NUM_NC)
+    , _enPin(GPIO_NUM_NC)
     , _initialized(false)
-    , _currentFrequency(1000.0f) {
+    , _currentFrequency(1000.0f)
+    , _linearAccelSteps(0)
+    , _autoEnableActive(false) {
 }
 
 FastAccelStepperWrapper::~FastAccelStepperWrapper() {
@@ -22,9 +25,10 @@ FastAccelStepperWrapper::~FastAccelStepperWrapper() {
     // Note: _engine is singleton, don't delete
 }
 
-bool FastAccelStepperWrapper::init(gpio_num_t stepPin, gpio_num_t dirPin) {
+bool FastAccelStepperWrapper::init(gpio_num_t stepPin, gpio_num_t dirPin, gpio_num_t enPin) {
     _stepPin = stepPin;
     _dirPin = dirPin;
+    _enPin = enPin;
     
     Serial.println("[FastAccel] Initializing...");
     
@@ -55,6 +59,14 @@ bool FastAccelStepperWrapper::init(gpio_num_t stepPin, gpio_num_t dirPin) {
     
     // Configure direction pin
     _stepper->setDirectionPin((uint8_t)_dirPin, true, 0);  // dirHighCountsUp=true, no delay
+    
+    // Configure enable pin if provided
+    if (_enPin != GPIO_NUM_NC) {
+        // TMC drivers use active LOW enable (LOW = enabled)
+        _stepper->setEnablePin((uint8_t)_enPin, true);  // true = low active
+        Serial.print("[FastAccel] Enable pin: GPIO");
+        Serial.println(_enPin);
+    }
     
     // Set default speed and acceleration
     _stepper->setSpeedInHz((uint32_t)_currentFrequency);
@@ -170,4 +182,67 @@ void FastAccelStepperWrapper::setAcceleration(uint32_t accel) {
 bool FastAccelStepperWrapper::isMoving() const {
     if (!_initialized || !_stepper) return false;
     return _stepper->isRunning();
+}
+
+void FastAccelStepperWrapper::runForward() {
+    if (!_initialized || !_stepper) return;
+    _stepper->runForward();
+}
+
+void FastAccelStepperWrapper::runBackward() {
+    if (!_initialized || !_stepper) return;
+    _stepper->runBackward();
+}
+
+void FastAccelStepperWrapper::brake() {
+    if (!_initialized || !_stepper) return;
+    // stopMove() decelerates using configured acceleration
+    _stepper->stopMove();
+}
+
+void FastAccelStepperWrapper::setLinearAcceleration(uint32_t steps) {
+    if (!_initialized || !_stepper) return;
+    _linearAccelSteps = steps;
+    _stepper->setLinearAcceleration(steps);
+}
+
+uint32_t FastAccelStepperWrapper::getLinearAcceleration() const {
+    return _linearAccelSteps;
+}
+
+void FastAccelStepperWrapper::setAutoEnable(bool enable) {
+    if (!_initialized || !_stepper) return;
+    _autoEnableActive = enable;
+    _stepper->setAutoEnable(enable);
+    if (enable) {
+        // Small delay before first step (100µs), 100ms delay before disable
+        _stepper->setDelayToEnable(100);
+        _stepper->setDelayToDisable(100);
+    }
+}
+
+bool FastAccelStepperWrapper::isAutoEnableActive() const {
+    return _autoEnableActive;
+}
+
+int32_t FastAccelStepperWrapper::getTargetPosition() const {
+    if (!_initialized || !_stepper) return 0;
+    return _stepper->targetPos();
+}
+
+int32_t FastAccelStepperWrapper::getActualSpeed() const {
+    if (!_initialized || !_stepper) return 0;
+    // getCurrentSpeedInMilliHz returns milliHz (x1000), convert to Hz
+    // Returns signed value: positive = forward, negative = reverse
+    return _stepper->getCurrentSpeedInMilliHz(false) / 1000;
+}
+
+uint8_t FastAccelStepperWrapper::getRampState() const {
+    if (!_initialized || !_stepper) return RAMP_STATE_IDLE;
+    return _stepper->rampState();
+}
+
+bool FastAccelStepperWrapper::isRunningContinuously() const {
+    if (!_initialized || !_stepper) return false;
+    return _stepper->isRunningContinuously();
 }

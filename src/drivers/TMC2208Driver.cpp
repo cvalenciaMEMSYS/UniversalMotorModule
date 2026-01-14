@@ -43,6 +43,7 @@ TMC2208Driver::TMC2208Driver(HardwareSerial* serial, uint8_t txPin, uint8_t rxPi
     , _microsteps(DefaultMotorConfig::STEPPER_MICROSTEPS)
     , _maxSpeed(DefaultMotorConfig::STEPPER_MAX_SPEED)
     , _acceleration(1000.0f)  // Default acceleration
+    , _holdCurrentPercent(50) // Default 50% hold current
     , _currentSpeed(0) {
 }
 
@@ -69,7 +70,8 @@ bool TMC2208Driver::init() {
     digitalWrite(_dirPin, LOW);
     
     // Initialize MCPWM hardware stepper with FastAccelStepper
-    if (!_mcpwmStepper.init((gpio_num_t)_stepPin, (gpio_num_t)_dirPin)) {
+    // Pass enable pin so FastAccelStepper can control auto-enable/disable
+    if (!_mcpwmStepper.init((gpio_num_t)_stepPin, (gpio_num_t)_dirPin, (gpio_num_t)_enPin)) {
         Serial.println("TMC2208 Driver: MCPWM initialization failed!");
         return false;
     }
@@ -538,4 +540,85 @@ uint16_t TMC2208Driver::mrestoMicrosteps(uint8_t mres) {
     // microsteps = 256 >> MRES
     if (mres > 8) mres = 8;
     return 256 >> mres;
+}
+
+// =============================================================================
+// NEW FASTACCELSTEPPER-BASED METHODS
+// =============================================================================
+
+void TMC2208Driver::setLinearAcceleration(uint32_t steps) {
+    _mcpwmStepper.setLinearAcceleration(steps);
+    Serial.print("Linear acceleration set to ");
+    Serial.print(steps);
+    Serial.println(" steps (cubesteps)");
+}
+
+uint32_t TMC2208Driver::getLinearAcceleration() const {
+    return _mcpwmStepper.getLinearAcceleration();
+}
+
+void TMC2208Driver::setHoldCurrentPercent(uint8_t percent) {
+    if (percent > 100) percent = 100;
+    _holdCurrentPercent = percent;
+    
+    if (_driver != nullptr && _uartMode) {
+        // Convert percent to IHOLD register value (0-31)
+        uint8_t iholdValue = (percent * 31) / 100;
+        _driver->ihold(iholdValue);
+        
+        Serial.print("Hold current set to ");
+        Serial.print(percent);
+        Serial.print("% (IHOLD=");
+        Serial.print(iholdValue);
+        Serial.println(")");
+    }
+}
+
+uint8_t TMC2208Driver::getHoldCurrentPercent() const {
+    return _holdCurrentPercent;
+}
+
+void TMC2208Driver::setAutoDisable(bool enable) {
+    _mcpwmStepper.setAutoEnable(enable);
+    Serial.print("Auto-disable ");
+    Serial.println(enable ? "ON" : "OFF");
+}
+
+bool TMC2208Driver::isAutoDisableActive() const {
+    return _mcpwmStepper.isAutoEnableActive();
+}
+
+void TMC2208Driver::runForward() {
+    enable();
+    _mcpwmStepper.runForward();
+    _moving = true;
+    Serial.println("Running forward continuously...");
+}
+
+void TMC2208Driver::runBackward() {
+    enable();
+    _mcpwmStepper.runBackward();
+    _moving = true;
+    Serial.println("Running backward continuously...");
+}
+
+void TMC2208Driver::brake() {
+    _mcpwmStepper.brake();
+    Serial.println("Braking...");
+}
+
+int32_t TMC2208Driver::getTargetPosition() const {
+    return _mcpwmStepper.getTargetPosition();
+}
+
+int32_t TMC2208Driver::getActualSpeed() const {
+    return _mcpwmStepper.getActualSpeed();
+}
+
+uint8_t TMC2208Driver::getRampState() const {
+    return _mcpwmStepper.getRampState();
+}
+
+bool TMC2208Driver::isRunningContinuously() const {
+    return _mcpwmStepper.isRunningContinuously();
 }

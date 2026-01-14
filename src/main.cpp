@@ -46,6 +46,7 @@ MotorController controller;
 String inputBuffer = "";
 bool inputComplete = false;
 uint32_t lastCharTime = 0;  // For timeout-based command detection
+uint32_t lastSerialActivity = 0;  // Track actual serial data reception
 
 // Idle timeout for LED
 uint32_t lastActivityTime = 0;
@@ -103,12 +104,13 @@ void setup() {
 // =============================================================================
 
 void loop() {
-    // Update motor controller (handles ongoing motion)
+    // Update motor controller first (never block this, handles ongoing motion)
     controller.update();
     
-    // Process serial input FIRST (before status updates)
+    // Process serial input - Serial.available() is safe even if USB disconnected
     while (Serial.available()) {
         char c = Serial.read();
+        lastSerialActivity = millis();  // Track actual data reception
         
         if (c == '\n' || c == '\r') {
             if (inputBuffer.length() > 0) {

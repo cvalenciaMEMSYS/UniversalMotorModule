@@ -99,6 +99,24 @@ public:
     bool testConnection() override;
     
     // =========================================================================
+    // New FastAccelStepper-Based Methods
+    // =========================================================================
+    
+    void setLinearAcceleration(uint32_t steps) override;
+    uint32_t getLinearAcceleration() const override;
+    void setHoldCurrentPercent(uint8_t percent) override;
+    uint8_t getHoldCurrentPercent() const override;
+    void setAutoDisable(bool enable) override;
+    bool isAutoDisableActive() const override;
+    void runForward() override;
+    void runBackward() override;
+    void brake() override;
+    int32_t getTargetPosition() const override;
+    int32_t getActualSpeed() const override;
+    uint8_t getRampState() const override;
+    bool isRunningContinuously() const override;
+    
+    // =========================================================================
     // TMC2209-Specific Methods
     // =========================================================================
     
@@ -190,6 +208,7 @@ private:
     uint16_t _microsteps;
     float _maxSpeed;
     float _acceleration;  // Steps/s² for FastAccelStepper
+    uint8_t _holdCurrentPercent;  // 0-100% of run current
     
     // Current speed tracking (for status reporting)
     float _currentSpeed;

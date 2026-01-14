@@ -20,6 +20,20 @@
 #include "../drivers/DriverFactory.h"
 // Note: AccelerationProfile.h removed - now handled by FastAccelStepper library
 
+// FIX #5: Input validation limits
+namespace MotorLimits {
+    constexpr int32_t MAX_MOVE_STEPS = 1000000;       // ±1M steps max per command
+    constexpr int32_t MAX_POSITION = 100000000;       // 100M steps max absolute position
+    constexpr float MIN_SPEED = 1.0f;                 // 1 step/s minimum
+    constexpr float MAX_SPEED = 200000.0f;            // 200kHz maximum
+    constexpr float MIN_ACCELERATION = 0.0f;          // 0 = constant velocity (no accel)
+    constexpr float MAX_ACCELERATION = 1000000.0f;    // 1M steps/s² maximum
+    constexpr uint16_t MIN_CURRENT_MA = 100;          // 100mA minimum
+    constexpr uint16_t MAX_CURRENT_MA = 3000;         // 3A maximum
+    constexpr uint16_t MIN_MICROSTEPS = 1;            // Full step
+    constexpr uint16_t MAX_MICROSTEPS = 256;          // 256 microsteps
+}
+
 /**
  * @brief High-level motor controller
  * 

@@ -42,9 +42,10 @@ public:
      * 
      * @param stepPin GPIO pin for STEP output (hardware PWM pin)
      * @param dirPin GPIO pin for DIRECTION control
+     * @param enPin GPIO pin for ENABLE control (optional, 255 = none)
      * @return true if initialization successful, false on error
      */
-    bool init(gpio_num_t stepPin, gpio_num_t dirPin);
+    bool init(gpio_num_t stepPin, gpio_num_t dirPin, gpio_num_t enPin = GPIO_NUM_NC);
     
     /**
      * @brief Set step pulse frequency (speed)
@@ -160,14 +161,96 @@ public:
      * @return true if motion in progress, false if stopped
      */
     bool isMoving() const;
+    
+    /**
+     * @brief Run continuously forward
+     * 
+     * @note Runs at configured speed until stop/brake is called
+     */
+    void runForward();
+    
+    /**
+     * @brief Run continuously backward
+     * 
+     * @note Runs at configured speed until stop/brake is called
+     */
+    void runBackward();
+    
+    /**
+     * @brief Controlled stop with deceleration
+     * 
+     * @note Decelerates using configured acceleration to halt
+     */
+    void brake();
+    
+    /**
+     * @brief Set linear acceleration (S-curve) steps
+     * 
+     * @param steps Number of steps for acceleration ramp (0=trapezoidal)
+     * 
+     * @note Higher values = smoother motion, slower start
+     */
+    void setLinearAcceleration(uint32_t steps);
+    
+    /**
+     * @brief Get current linear acceleration setting
+     * 
+     * @return Current cubesteps value (0 if trapezoidal)
+     */
+    uint32_t getLinearAcceleration() const;
+    
+    /**
+     * @brief Enable/disable auto-enable feature
+     * 
+     * @param enable true = auto enable/disable, false = manual control
+     */
+    void setAutoEnable(bool enable);
+    
+    /**
+     * @brief Check if auto-enable is active
+     * 
+     * @return true if auto-enable is on
+     */
+    bool isAutoEnableActive() const;
+    
+    /**
+     * @brief Get target position for current move
+     * 
+     * @return Target position in steps
+     */
+    int32_t getTargetPosition() const;
+    
+    /**
+     * @brief Get actual current speed (not configured max)
+     * 
+     * @return Current speed in steps/sec (signed, negative = reverse)
+     */
+    int32_t getActualSpeed() const;
+    
+    /**
+     * @brief Get ramp state
+     * 
+     * @return Ramp state (IDLE, ACCELERATING, COASTING, DECELERATING)
+     */
+    uint8_t getRampState() const;
+    
+    /**
+     * @brief Check if running continuously
+     * 
+     * @return true if in continuous run mode
+     */
+    bool isRunningContinuously() const;
 
 private:
     FastAccelStepperEngine* _engine;      ///< FastAccelStepper engine instance
     FastAccelStepper* _stepper;           ///< Stepper controller instance
     gpio_num_t _stepPin;                  ///< Step pulse output pin
     gpio_num_t _dirPin;                   ///< Direction control pin
+    gpio_num_t _enPin;                    ///< Enable control pin
     bool _initialized;                    ///< Initialization state
     float _currentFrequency;              ///< Current configured frequency (Hz)
+    uint32_t _linearAccelSteps;           ///< S-curve ramp steps (0=trapezoidal)
+    bool _autoEnableActive;               ///< Auto enable/disable state
 };
 
 #endif // FASTACCEL_STEPPER_WRAPPER_H

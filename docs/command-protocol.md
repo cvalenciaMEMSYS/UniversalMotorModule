@@ -18,15 +18,24 @@ The Universal Motor Module uses a human-readable serial command protocol at 1152
 |---------|------------------------|----------|
 | `move <n>` | Move n steps | Run for n milliseconds |
 | `abs <n>` | Move to position n | Set speed -1000 to +1000 |
+| `run forward` | Run continuously forward | Run forward |
+| `run backward` | Run continuously backward | Run backward |
+| `stop` | Emergency stop (immediate) | Stop with brake |
+| `brake` | Controlled stop (decelerate) | Stop with ramp |
 | `home` | StallGuard homing (TMC2209 only) | Not supported |
-| `stop` | Emergency stop | Stop with brake |
 | `enable` | Enable driver | Enable H-bridge |
 | `disable` | Disable driver (coast) | Disable (coast) |
 | `set speed <n>` | Max steps/sec | Max speed % (0-100) |
-| `set current <n>` | Motor current mA | Not applicable |
-| `set microsteps <n>` | Microstepping divisor | Not applicable |
 | `set accel <n>` | Acceleration steps/sec² | Ramp rate %/sec |
-| `set jerk <n>` | S-curve jerk | S-curve jerk |
+| `set cubesteps <n>` | S-curve ramp steps (0=trapezoidal) | Not applicable |
+| `set current <n>` | Motor current mA | Not applicable |
+| `set ihold <n>` | Hold current % (0-100) | Not applicable |
+| `set microsteps <n>` | Microstepping divisor | Not applicable |
+| `set autodisable on/off` | Auto enable/disable motor | Not applicable |
+| `get pos` | Query current position | Not applicable |
+| `get target` | Query target position | Not applicable |
+| `get speed` | Query actual speed | Not applicable |
+| `get rampstate` | Query ramp generator state | Not applicable |
 | `stepdir on/off` | UART ↔ Step/Dir mode | Not applicable |
 | `scan` | Scan UART addresses (TMC2209) | Not applicable |
 | `reboot` | Soft reset ESP32 | Soft reset ESP32 |
@@ -46,8 +55,11 @@ The Universal Motor Module uses a human-readable serial command protocol at 1152
 |---------|-------------|---------|
 | `move <steps>` | Relative move (positive or negative steps) | `move 100`, `move -50` |
 | `abs <position>` | Move to absolute position (must be ≥ 0) | `abs 0`, `abs 1000` |
+| `run forward` | Run continuously forward at max speed | `run forward` |
+| `run backward` | Run continuously backward at max speed | `run backward` |
+| `stop` | Emergency stop (immediate halt, no deceleration) | `stop` |
+| `brake` | Controlled stop (decelerate using configured accel) | `brake` |
 | `home` | Find home position using StallGuard | `home` |
-| `stop` | Emergency stop (immediate halt) | `stop` |
 
 ### Motor Control
 
@@ -61,10 +73,21 @@ The Universal Motor Module uses a human-readable serial command protocol at 1152
 | Command | Description | Example |
 |---------|-------------|---------|
 | `set speed <value>` | Set maximum speed (steps/sec) | `set speed 500` |
-| `set current <mA>` | Set motor run current | `set current 400` |
-| `set microsteps <n>` | Set microstepping (1, 2, 4, 8, 16, 32, 64, 128, 256) | `set microsteps 16` |
 | `set accel <value>` | Set acceleration (steps/sec²) | `set accel 200` |
-| `set jerk <value>` | Set jerk for S-curve profile (steps/sec³) | `set jerk 1000` |
+| `set cubesteps <n>` | Set S-curve ramp steps (0=trapezoidal) | `set cubesteps 100` |
+| `set current <mA>` | Set motor run current | `set current 400` |
+| `set ihold <percent>` | Set hold current (0-100% of run) | `set ihold 50` |
+| `set microsteps <n>` | Set microstepping (1-256, power of 2) | `set microsteps 16` |
+| `set autodisable <on/off>` | Enable auto enable/disable | `set autodisable on` |
+
+### Query Commands
+
+| Command | Description | Example Output |
+|---------|-------------|----------------|
+| `get pos` | Get current position | `Position: 15234 steps` |
+| `get target` | Get target position | `Target: 20000 steps` |
+| `get speed` | Get actual current speed | `Current speed: 5000 steps/s` |
+| `get rampstate` | Get ramp generator state | `Ramp state: ACCELERATING` |
 
 ### UART Control Commands
 
@@ -151,19 +174,56 @@ Valid values: 1, 2, 4, 8, 16, 32, 64, 128, 256
 
 ### Acceleration Profiles
 
-When you set acceleration, the profile type changes automatically:
+FastAccelStepper supports three acceleration modes controlled by `set accel` and `set cubesteps`:
 
 ```
-# No acceleration (default)
-set accel 0           # Constant velocity profile
+# Mode 1: Constant velocity (no acceleration)
+set accel 0           # Motor instantly runs at target speed
 
-# With acceleration
-set accel 500         # Trapezoidal profile: 500 steps/sec²
+# Mode 2: Trapezoidal (linear acceleration)
+set accel 1000        # 1000 steps/sec² acceleration
+set cubesteps 0       # Instant jump to configured acceleration
 
-# S-curve (jerk-limited)
-set accel 500
-set jerk 1000         # S-curve profile: accel=500, jerk=1000
+# Mode 3: S-curve (smooth acceleration)
+set accel 1000        # 1000 steps/sec² target acceleration  
+set cubesteps 100     # Ramp to target accel over 100 steps
 ```
+
+**How cubesteps works:**
+- `cubesteps = 0` → Trapezoidal profile (instant acceleration)
+- `cubesteps > 0` → S-curve profile (acceleration ramps from 0 to configured value)
+- Higher values = smoother motion but slower start
+
+### `set ihold <percent>`
+
+Sets the hold current as a percentage of run current (0-100%).
+
+```
+set ihold 0           # No holding torque (motor can freewheel when idle)
+set ihold 50          # 50% of run current when idle (default)
+set ihold 100         # Full current when idle (max holding, max heat)
+```
+
+**Note:** Only effective when `autodisable off` (motor stays enabled).
+
+### `set autodisable on/off`
+
+Controls automatic motor enable/disable behavior.
+
+```
+set autodisable on    # Motor auto-enables for moves, auto-disables after
+set autodisable off   # Motor stays enabled (manual control)
+```
+
+**When autodisable ON:**
+- Motor enables just before movement
+- Motor disables ~100ms after movement completes
+- Reduces heat and power consumption
+
+**When autodisable OFF:**
+- Motor stays enabled with hold current
+- Maintains position against external forces
+- Required if you need holding torque
 
 ### `stepdir on/off` (TMC Drivers Only)
 

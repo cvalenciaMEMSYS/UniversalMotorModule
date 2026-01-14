@@ -255,6 +255,97 @@ public:
      */
     virtual void setAcceleration(float accelStepsPerSecondSquared) = 0;
     
+    /**
+     * @brief Set linear acceleration (S-curve) steps
+     * @param steps Number of steps for acceleration ramp (0=trapezoidal)
+     * 
+     * Higher values = smoother motion, slower start.
+     * Also known as "cubesteps" in the command protocol.
+     */
+    virtual void setLinearAcceleration(uint32_t steps) { (void)steps; }
+    
+    /**
+     * @brief Get current linear acceleration setting
+     * @return Current cubesteps value (0 if trapezoidal)
+     */
+    virtual uint32_t getLinearAcceleration() const { return 0; }
+    
+    /**
+     * @brief Set hold current percentage
+     * @param percent Hold current as percentage of run current (0-100)
+     * 
+     * 0% = no holding torque when idle
+     * 100% = full run current when idle
+     */
+    virtual void setHoldCurrentPercent(uint8_t percent) { (void)percent; }
+    
+    /**
+     * @brief Get current hold current percentage
+     * @return Hold current as percentage (0-100)
+     */
+    virtual uint8_t getHoldCurrentPercent() const { return 0; }
+    
+    /**
+     * @brief Enable/disable auto-enable feature
+     * @param enable true = motor auto-enables for moves, auto-disables after
+     * 
+     * When enabled, motor automatically enables before movement
+     * and disables shortly after movement completes.
+     */
+    virtual void setAutoDisable(bool enable) { (void)enable; }
+    
+    /**
+     * @brief Check if auto-disable is active
+     * @return true if auto-disable mode is on
+     */
+    virtual bool isAutoDisableActive() const { return false; }
+    
+    /**
+     * @brief Run continuously forward
+     * 
+     * Motor runs at configured speed until stop/brake is called.
+     */
+    virtual void runForward() {}
+    
+    /**
+     * @brief Run continuously backward
+     * 
+     * Motor runs at configured speed until stop/brake is called.
+     */
+    virtual void runBackward() {}
+    
+    /**
+     * @brief Controlled stop with deceleration
+     * 
+     * Decelerates using configured acceleration rate, then halts.
+     * Differs from emergencyStop which is immediate.
+     */
+    virtual void brake() {}
+    
+    /**
+     * @brief Get target position for current move
+     * @return Target position in steps
+     */
+    virtual int32_t getTargetPosition() const { return 0; }
+    
+    /**
+     * @brief Get actual current speed (not configured max)
+     * @return Current speed in steps/sec (signed: positive=forward)
+     */
+    virtual int32_t getActualSpeed() const { return 0; }
+    
+    /**
+     * @brief Get ramp state
+     * @return Ramp state code (IDLE=0, COAST=1, ACCEL=2, DECEL=4)
+     */
+    virtual uint8_t getRampState() const { return 0; }
+    
+    /**
+     * @brief Check if running continuously
+     * @return true if in continuous run mode
+     */
+    virtual bool isRunningContinuously() const { return false; }
+    
     // =========================================================================
     // Position
     // =========================================================================
