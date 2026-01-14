@@ -55,6 +55,12 @@ StatusLED::StatusLED()
 // =============================================================================
 
 void StatusLED::begin() {
+    // Initialize NeoPixel - first call to neopixelWrite sets up RMT peripheral
+    // Start with LED off to ensure clean state
+    neopixelWrite(LED_PIN, 0, 0, 0);
+    _displayedColor = LEDColor(0, 0, 0);
+    delay(10);  // Brief delay for RMT initialization
+    
     // Set initial color to blue (initializing)
     _baseColor = LEDColor(0, 0, _brightness);
     applyColor(_baseColor);
@@ -195,6 +201,10 @@ void StatusLED::playStartupSequence() {
     
     // Color Chase: Red → Green → Blue → White → Off
     // Quick flashes indicating fresh boot
+    
+    // Ensure LED starts off (clean slate)
+    applyColor(0, 0, 0);
+    delay(50);
     
     // Red flash
     applyColor(255, 0, 0);

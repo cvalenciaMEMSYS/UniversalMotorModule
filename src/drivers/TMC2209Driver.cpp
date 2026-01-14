@@ -647,10 +647,19 @@ uint8_t TMC2209Driver::getHoldCurrentPercent() const {
     return _holdCurrentPercent;
 }
 
-void TMC2209Driver::setAutoDisable(bool enable) {
-    _mcpwmStepper.setAutoEnable(enable);
-    Serial.print("Auto-disable ");
-    Serial.println(enable ? "ON" : "OFF");
+void TMC2209Driver::setAutoDisable(bool enableAutoDisable) {
+    _mcpwmStepper.setAutoEnable(enableAutoDisable);
+    
+    if (enableAutoDisable) {
+        // Auto-disable ON: Motor will be auto-enabled before moves and auto-disabled after
+        // Keep current state - library will handle enable/disable on next move
+        Serial.println("Auto-disable ON");
+    } else {
+        // Auto-disable OFF: Motor should stay enabled
+        // Re-enable immediately (in case it was disabled by auto-disable)
+        enable();
+        Serial.println("Auto-disable OFF - motor enabled");
+    }
 }
 
 bool TMC2209Driver::isAutoDisableActive() const {
