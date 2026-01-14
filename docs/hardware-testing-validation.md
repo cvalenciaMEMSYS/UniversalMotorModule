@@ -2,7 +2,9 @@
 
 ## 1. Overview
 
-This document provides a comprehensive testing and validation plan for the Universal Motor Module hardware. It covers basic connectivity through to edge case validation for all supported motor drivers (TMC2209, TMC2208, DC Motor RZ7899).
+This document provides a comprehensive testing and validation plan for the Universal Motor Module v2.0 firmware using FastAccelStepper. All test commands have been updated to match the current command protocol.
+
+**Firmware Version**: v2.0 (FastAccelStepper)
 
 ---
 
@@ -20,13 +22,11 @@ This document provides a comprehensive testing and validation plan for the Unive
 - USB cable for programming/debugging
 - Multimeter
 - Oscilloscope (recommended for timing analysis)
-- Logic analyzer (optional, useful for UART debugging)
 
 ### Software Tools
 
 - PlatformIO IDE
-- Serial terminal (PuTTY, minicom, or VS Code Serial Monitor)
-- Logic analyzer software (if using)
+- Serial terminal (115200 baud)
 
 ---
 
@@ -34,10 +34,10 @@ This document provides a comprehensive testing and validation plan for the Unive
 
 ### 3.1 Visual Inspection
 
-- [x] Check solder joints on ESP32-S3 module
-- [x] Verify correct orientation of driver modules
-- [x] Confirm power supply voltage (12V for motors)
-- [x] Check all wire connections match [PinConfig.h](../src/config/PinConfig.h)
+- [ ] Check solder joints on ESP32-S3 module
+- [ ] Verify correct orientation of driver modules
+- [ ] Confirm power supply voltage (12V for motors)
+- [ ] Check all wire connections match PinConfig.h
 
 ### 3.2 Pin Assignment Verification
 
@@ -48,8 +48,8 @@ This document provides a comprehensive testing and validation plan for the Unive
 | TMC EN       | 4    | To TMC EN pin     |
 | TMC STEP     | 5    | To TMC STEP       |
 | TMC DIR      | 6    | To TMC DIR        |
-| DC IN1       | 7    | To H-Bridge IN1   |
-| DC IN2       | 8    | To H-Bridge IN2   |
+| DC FI        | 8    | To H-Bridge FI    |
+| DC BI        | 9    | To H-Bridge BI    |
 | DETECT VCC 1 | 10   | Detection circuit |
 | DETECT BIT 0 | 11   | Detection circuit |
 | DETECT BIT 1 | 12   | Detection circuit |
@@ -62,7 +62,9 @@ This document provides a comprehensive testing and validation plan for the Unive
 
 ### Phase 1: Basic System Validation
 
-#### 1.1 ESP32-S3 Alive Test
+---
+
+#### 1.1 ESP32-S3 Boot Test
 
 **Objective**: Verify ESP32 boots and USB communication works
 
@@ -76,41 +78,81 @@ This document provides a comprehensive testing and validation plan for the Unive
 **Expected Results**:
 
 ```
-Universal Motor Module v1.0
+Universal Motor Module v2.0
 Detecting motor driver...
+TMC2209 detected
+Ready for commands. Type 'help' for available commands.
 ```
 
 **Pass Criteria**: Boot messages appear within 5 seconds
 
-- [x] PASS
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
 
 ---
 
-#### 1.2 Status LED Test
+#### 1.2 Startup LED Sequence Test
 
-**Objective**: Verify NeoPixel LED (GPIO 48) works
+**Objective**: Verify startup RGB chase sequence
 
 **Procedure**:
 
-1. Power on system
-2. Observe LED color sequence during boot
-3. Verify color matches motor detection state
+1. Power on or reset the ESP32
+2. Observe LED immediately after boot
 
 **Expected Results**:
 
-| State             | LED Color  |
-| ----------------- | ---------- |
-| Booting           | Blue flash |
-| TMC2209 detected  | Green      |
-| TMC2208 detected  | Cyan       |
-| DC Motor detected | Yellow     |
-| Error             | Red blink  |
+- Red flash (150ms)
+- Green flash (150ms)
+- Blue flash (150ms)
+- White flash (150ms)
+- Then transitions to initializing (blue) → ready (driver color)
 
-- [x] PASS
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
 
 ---
 
-#### 1.3 Driver Detection Test
+#### 1.3 Status LED Colors Test
+
+**Objective**: Verify LED shows correct colors for states
+
+**Commands to test**:
+
+```
+status          # LED shows driver color (green for TMC2209)
+enable          # LED bright
+disable         # LED dimmed
+move 3200       # LED pulses during motion
+```
+
+**Expected Colors**:
+
+| State            | LED Color |
+| ---------------- | --------- |
+| Startup sequence | R→G→B→W   |
+| Initializing     | Blue      |
+| TMC2209 Ready    | Green     |
+| TMC2208 Ready    | Cyan      |
+| DC Motor Ready   | Yellow    |
+| Moving           | Pulsing   |
+| Error            | Red       |
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 1.4 Driver Detection Test
 
 **Objective**: Verify hardware detection circuit
 
@@ -118,7 +160,7 @@ Detecting motor driver...
 
 1. Connect detection jumpers for each driver type
 2. Reset ESP32
-3. Verify correct driver detected
+3. Observe detected driver in boot message
 
 **Expected Results**:
 
@@ -127,40 +169,39 @@ Detecting motor driver...
 | LOW     | LOW     | TMC2209         |
 | HIGH    | LOW     | DC Motor        |
 | LOW     | HIGH    | TMC2208         |
-| HIGH    | HIGH    | Reserved        |
 
-- [x] PASS
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
 
 ---
 
 ### Phase 2: TMC2209 Stepper Driver Tests
 
+---
+
 #### 2.1 UART Communication Test
 
 **Objective**: Verify TMC2209 UART communication
 
-**Procedure**:
+**Commands**:
 
-1. Connect TMC2209 with UART wiring
-2. Power on system
-3. Send command: `STATUS`
+```
+status
+diag
+```
 
 **Expected Results**:
 
-```
-TMC2209 UART: Initialized
-GCONF: 0x000001C3
-Connection: OK
-```
+- Status shows driver info, position, speed settings
+- Diag shows TMC2209 register values and no error flags
 
-**Troubleshooting**:
+##### Test Result
 
-- If "UART unavailable", check 1kΩ resistor between TX/RX
-- If garbled output, verify baud rate (115200)
-
-**Test Result**:
-
-- [x] PASS
+- [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
@@ -169,21 +210,23 @@ Connection: OK
 
 **Objective**: Verify motor enable control
 
+**Commands**:
+
+```
+enable
+disable
+enable
+```
+
 **Procedure**:
 
-1. Send `ENABLE` command
-2. Measure EN pin with multimeter (should be LOW)
-3. Send `DISABLE` command
-4. Measure EN pin (should be HIGH)
+1. Send `enable` - motor should hold position (hard to turn)
+2. Send `disable` - motor should free-wheel (easy to turn)
 
-**Expected Results**:
+##### Test Result
 
-- Motor holds position when enabled
-- Motor free-wheels when disabled
-
-**Test Result**:
-
-- [x] PASS
+- [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
@@ -192,545 +235,632 @@ Connection: OK
 
 **Objective**: Verify step/dir motion control
 
-**Procedure**:
+**Commands**:
 
-1. Send `ENABLE`
-2. Send `MOVE 200` (one revolution on 200-step motor)
-3. Observe motor rotation
-4. Send `MOVE -200`
-5. Observe reverse rotation
+```
+enable
+set speed 3200
+set accel 5000
+move 3200
+status
+move -3200
+status
+```
 
 **Expected Results**:
 
 - Motor completes one full revolution forward
+- Position shows 3200
 - Motor completes one full revolution reverse
-- Position reported as 0 after return move
+- Position shows 0
 
-**Test Result**:
+##### Test Result
 
-- [x] PASS
+- [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 2.4 Acceleration Profile Tests
+#### 2.4 Speed Configuration Test
 
-##### 2.4.1 Trapezoidal Profile
+**Commands**:
 
-**Procedure**:
-
-1. Send `PROFILE TRAPEZOIDAL`
-2. Send `SPEED 1000` (steps/sec)
-3. Send `ACCEL 500` (steps/sec²)
-4. Send `MOVE 5000`
-5. Observe speed ramp-up, cruise, ramp-down
-
-**Expected Results**:
-
-- Smooth acceleration from rest
-- Constant cruise speed in middle
-- Smooth deceleration to stop
-- No missed steps or stalls
-
-**Test Result**:
-
-- [ ] PASS > Seems like, even though almost not percebtible, motor does skip steps when using a non linear velocity profile, need to investigate pulse output of the controller. This results in a non consistent end position.
-- [ ] SKIPPED
-
-##### 2.4.2 S-Curve Profile
-
-**Procedure**:
-
-1. Send `PROFILE SCURVE`
-2. Send `JERK 5000`
-3. Send `MOVE 5000`
-4. Compare smoothness to trapezoidal
+```
+set speed 1000
+move 3200
+set speed 10000
+move 3200
+set speed 50000
+move 3200
+```
 
 **Expected Results**:
 
-- Even smoother acceleration transitions
-- Reduced mechanical vibration
-- No audible "jerk" at profile transitions
+- Each move completes at visibly different speeds
+- All moves accurate (1 revolution each)
 
-**Test Result**:
+##### Test Result
 
-- [ ] PASS > Visually looks smoother so the curve does work, but the skipped steps at low speeds are evne more noticeable/
-- [ ] SKIPPED
-
-##### 2.4.3 Constant Speed
-
-**Procedure**:
-
-1. Send `PROFILE CONSTANT`
-2. Send `MOVE 1000`
-
-**Expected Results**:
-
-- Immediate jump to target speed (may cause step loss at high speeds)
-
-**Test Result**:
-
-- [ ] PASS > Same as the rest, visually the most consistent one, step skipping happens at random.
+- [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 2.5 Current Control Tests
+#### 2.5 Acceleration Test
 
-**Objective**: Verify UART-based current control
+**Commands**:
 
-**Procedure**:
-
-1. Send `CURRENT 200` (200mA run current)
-2. Feel motor torque (should be weak)
-3. Send `CURRENT 800` (800mA)
-4. Feel motor torque (should be stronger)
+```
+set accel 500
+move 10000
+set accel 5000
+move 10000
+set accel 50000
+move 10000
+```
 
 **Expected Results**:
 
-- Noticeable torque difference
-- Motor temperature increases with higher current
+- Low accel: Slow ramp up/down visible
+- High accel: Quick ramp, almost instant speed changes
+- All moves accurate
 
-**Safety**: Do not exceed motor/driver rated current
+##### Test Result
 
-**Test Result**:
-
-- [ ] PASS > even though the driver reports back the correct updated current, the motor itself does not feel stronger. Matter of fact, it is easy to turn regardless of what current value is set, just a slightly increased resitance vs disabled. when moving it does have more torque at higher currents, but the holding torque gets reduced apparently?
+- [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 2.6 Microstep Tests
+#### 2.6 Constant Velocity Mode Test
 
-**Procedure**:
+**Objective**: Test `set accel 0` for constant velocity
 
-1. Send `MICROSTEPS 16`
-2. Send `MOVE 200` → should rotate 1/16 revolution
-3. Send `MICROSTEPS 256`
-4. Send `MOVE 200` → should rotate 200/256 = 0.78 of a step
+**Commands**:
+
+```
+set accel 0
+move 3200
+```
 
 **Expected Results**:
 
+- Message: "Constant velocity mode (very high internal accel)"
+- Motor moves at set speed with minimal ramp
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.7 S-Curve (Cubesteps) Test
+
+**Objective**: Test cubic acceleration for smooth motion
+
+**Commands**:
+
+```
+set cubesteps 50
+set speed 5000
+set accel 2000
+move 10000
+set cubesteps 0
+move 10000
+```
+
+**Expected Results**:
+
+- With cubesteps: Smoother acceleration start/end
+- Without cubesteps: Standard linear acceleration
+- Verify with oscilloscope for smooth frequency ramp
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.8 Continuous Rotation Test
+
+**Objective**: Test run forward/backward commands
+
+**Commands**:
+
+```
+run forward
+(wait 3 seconds)
+brake
+run backward
+(wait 3 seconds)
+stop
+```
+
+**Expected Results**:
+
+- `run forward`: Motor accelerates to set speed, continues
+- `brake`: Motor decelerates smoothly to stop
+- `run backward`: Motor runs opposite direction
+- `stop`: Motor stops immediately
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.9 Position Query Test
+
+**Commands**:
+
+```
+set pos 0
+move 1000
+get pos
+get target
+move 500
+get pos
+get target
+```
+
+**Expected Results**:
+
+- `get pos` shows current position
+- `get target` shows target position
+- Values update correctly during/after moves
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.10 Speed Query Test
+
+**Commands**:
+
+```
+run forward
+get speed
+get rampstate
+brake
+get speed
+get rampstate
+```
+
+**Expected Results**:
+
+- During motion: `get speed` shows current speed
+- `get rampstate`: 1 (accelerating), 0 (coasting), -1 (decelerating)
+- After stop: speed shows 0
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.11 Current Control Test
+
+**Commands**:
+
+```
+set current 400
+enable
+(try to turn motor by hand)
+set current 1200
+(try to turn motor by hand)
+```
+
+**Expected Results**:
+
+- Low current: Motor can be turned with some resistance
+- High current: Motor much harder to turn
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.12 Hold Current Test
+
+**Objective**: Test IHOLD configuration
+
+**Commands**:
+
+```
+set ihold 25
+enable
+(motor at 25% hold current when stationary)
+set ihold 100
+(motor at full hold current)
+```
+
+**Expected Results**:
+
+- Lower ihold: Weaker holding torque
+- Higher ihold: Stronger holding torque
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.13 Auto-Disable Test
+
+**Objective**: Test automatic motor enable/disable
+
+**Commands**:
+
+```
+set autodisable on
+move 3200
+(wait 200ms after move completes)
+(check if motor is free-wheeling)
+set autodisable off
+move 3200
+(motor should hold position after move)
+```
+
+**Expected Results**:
+
+- With autodisable on: Motor disables ~100ms after motion
+- With autodisable off: Motor stays enabled
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 2.14 Microstep Test
+
+**Commands**:
+
+```
+set microsteps 16
+move 3200
+set microsteps 64
+move 12800
+set microsteps 256
+move 51200
+```
+
+**Expected Results**:
+
+- Each move = 1 revolution
 - Higher microsteps = smoother motion
-- Position accuracy maintained
 
-**Test Result**:
+##### Test Result
 
-- [x] PASS
+- [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 2.7 StealthChop/SpreadCycle Tests
+#### 2.15 StealthChop/SpreadCycle Test
 
-**Procedure**:
-
-1. Enable StealthChop: `STEALTHCHOP ON`
-2. Move motor and listen for noise
-3. Switch to SpreadCycle: `STEALTHCHOP OFF`
-4. Compare noise levels
-
-**Expected Results**:
-
-- StealthChop: Very quiet, slight torque ripple
-- SpreadCycle: Audible stepping, more consistent torque
-
-**Test Result**:
-
-- [x] PASS
-- [ ] SKIPPED
-
----
-
-### Phase 3: TMC2208 Stepper Driver Tests
-
-*Similar to TMC2209 tests but with these differences:*
-
-#### 3.1 UART Connection Test
-
-**Note**: TMC2208 has single-wire UART on different pin
-
-**Expected Results**:
-
-- `TMC2208 UART: Initialized` message
-- Read GCONF register successfully
-
-#### 3.2 Fallback Mode Test
-
-**Objective**: Test Step/Dir fallback when UART unavailable
-
-**Procedure**:
-
-1. Disconnect UART wire
-2. Reset ESP32
-3. Verify Step/Dir mode activates
-
-**Expected Results**:
+**Commands**:
 
 ```
-TMC2208: UART unavailable - using Step/Dir mode
+stealthchop
+move 3200
+(listen for motor noise)
+spreadcycle
+move 3200
+(compare noise levels)
 ```
 
-**Test Result**:
-
-- [ ] PASS
-- [x] SKIPPED
-
----
-
-### Phase 4: DC Motor Driver Tests
-
-#### 4.1 Direction Control Test
-
-**Objective**: Verify H-bridge direction control
-
-**Procedure**:
-
-1. Send `FORWARD`
-2. Observe motor direction
-3. Send `REVERSE`
-4. Observe direction change
-5. Send `COAST`
-6. Motor should free-wheel
-7. Send `BRAKE`
-8. Motor should lock
-
 **Expected Results**:
 
-| Command | IN1  | IN2  | Motor State |
-| ------- | ---- | ---- | ----------- |
-| FORWARD | PWM  | LOW  | Forward     |
-| REVERSE | LOW  | PWM  | Reverse     |
-| COAST   | LOW  | LOW  | Free-wheel  |
-| BRAKE   | HIGH | HIGH | Locked      |
+- StealthChop: Very quiet operation
+- SpreadCycle: Audible stepping, more torque
 
-**Test Result**:
+##### Test Result
 
 - [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 4.2 Speed Control Test
+### Phase 3: High-Speed & Precision Tests
 
-**Procedure**:
+---
 
-1. Send `SPEED 0.25` (25% speed)
-2. Listen/observe motor speed
-3. Send `SPEED 0.5` (50%)
-4. Send `SPEED 1.0` (100%)
+#### 3.1 Maximum Speed Test
+
+**Commands**:
+
+```
+set speed 100000
+set accel 50000
+move 100000
+```
 
 **Expected Results**:
 
-- Proportional speed changes
-- PWM frequency inaudible (20kHz)
+- Motor reaches high speed without stalling
+- Use oscilloscope to verify pulse rate
 
-**Test Result**:
+##### Test Result
 
 - [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 4.3 Timed Move Test
+#### 3.2 Position Accuracy Test
 
-**Procedure**:
+**Commands**:
 
-1. Send `MOVE 1000` (run for 1000ms)
-2. Verify motor runs for ~1 second
-3. Verify motor stops automatically
+```
+set pos 0
+move 32000
+move -32000
+get pos
+```
 
-**Test Result**:
+**Expected Results**:
+
+- After forward+backward: Position returns to 0
+- No accumulated error
+
+##### Test Result
 
 - [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-### Phase 5: Edge Case Testing
+#### 3.3 Pulse Gap Test (Oscilloscope)
 
-#### 5.1 Power Failure Recovery
+**Objective**: Verify no gaps during acceleration
 
-**Procedure**:
+**Commands**:
 
-1. Start a long move (MOVE 100000)
-2. Cut 12V power during move
-3. Restore 12V power
-4. Check system state
+```
+set speed 10000
+set accel 1000
+move 100000
+```
+
+**Oscilloscope Setup**:
+
+- Probe on STEP pin (GPIO 5)
+- Trigger on rising edge
+- Timebase: 10ms/div
 
 **Expected Results**:
 
-- ESP32 should detect motor fault
-- Position tracking should indicate error
-- System should require re-homing
+- Continuous pulse train
+- No gaps during acceleration/deceleration
+- Smooth frequency ramp
 
-**Test Result**:
+##### Test Result
 
 - [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 5.2 Rapid Command Spam
+### Phase 4: Edge Case Tests
 
-**Procedure**:
+---
 
-1. Send 100 commands rapidly via script:
+#### 4.1 Command Spam Test
 
-   ```python
-   for i in range(100):
-       serial.write(f"MOVE {i*10}\n")
-   ```
-1. Observe behavior
+**Procedure**: Send many commands rapidly
+
+**Commands**:
+
+```
+move 100
+move 200
+move 300
+stop
+move 100
+```
 
 **Expected Results**:
 
-- Commands should be queued or rejected
+- System handles rapid commands
 - No crashes or hangs
-- Buffer overflow should be handled gracefully
 
-**Test Result**:
+##### Test Result
 
 - [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 5.3 Invalid Command Handling
+#### 4.2 Invalid Input Test
 
-**Procedure**:
+**Commands to test**:
 
-Test various invalid inputs:
-
-- `MOVE abc` (non-numeric) > Handled correctly
-- `MOVE 999999999999` (overflow) > weird, target position does become an overflow negative value, but the motor does move in the positive direction, should be a guard to simply ignore command.
-- `SPEED -100` (negative) > Correct, speed is set to 1.
-- `CURRENT 10000` (out of range) > Works on driver side, current gets simply set to max.
-- Empty command > Does nothing, correct.
-- Very long string (1000+ chars) > Correct, invalid command.
+```
+move abc
+move 999999999999
+set speed -100
+set current 99999
+invalidcommand
+```
 
 **Expected Results**:
 
-- Error messages for each invalid input
+- Error messages for invalid input
 - System remains stable
-- No crashes or resets
 
-**Test Result**:
+##### Test Result
 
-- [x] PASS
+- [ ] PASS
+- [ ] FAILED
 - [ ] SKIPPED
 
 ---
 
-#### 5.4 Stall Detection Test (TMC2209 only)
+#### 4.3 Emergency Stop Test
 
-**Procedure**:
-
-1. Enable stall detection: `STALLGUARD ON`
-2. Set threshold: `STALLGUARD_THRESHOLD 50`
-3. Hold motor shaft during move
-4. Observe stall detection
-
-**Expected Results**:
-
-- Motor should stop on stall
-- `STALL DETECTED` message appears
-- Position tracking stops
-
-**Test Result**:
-
-- [ ] PASS
-- [x] SKIPPED > Not implemented! 
-
----
-
-#### 5.5 Overtemperature Handling
-
-**Procedure**:
-
-1. Run motor at high current continuously
-2. Monitor TMC driver status
-3. Check for thermal shutdown
-
-**Expected Results**:
-
-- `OVER_TEMP_WARNING` at 120°C
-- `OVER_TEMP_SHUTDOWN` at 150°C
-- Motor disabled automatically
-
-**Test Result**:
-
-- [ ] PASS
-- [x] SKIPPED
-
----
-
-#### 5.6 Short Move / Triangular Profile Test
-
-**Procedure**:
-
-1. Set high speed/low accel: `SPEED 10000`, `ACCEL 100`
-2. Send short move: `MOVE 50`
-3. Verify triangular profile detected
-
-**Expected Results**:
-
-- Motor accelerates partway, then decelerates
-- Never reaches max speed
-- Move completes accurately > Fail, motor does speed up and down without getting to max speed, but overshoots the expected end position by a lot.
-
-**Test Result**:
-
-- [ ] PASS
-- [ ] SKIPPED
-
----
-
-#### 5.7 Very Slow Speed Test
-
-**Procedure**:
-
-1. Send `SPEED 10` (10 steps/sec)
-2. Send `MOVE 100`
-3. Observe very slow motion
-
-**Expected Results**:
-
-- 10 seconds to complete move > Speeds under 1000 steps/s seem to increase the ammount of steps done? 1/16 microstepping config, 3200 steps per revolution. If ordered to move 3200 steps at any speed over 1000, it does 1 turn, any speed under that makes it do more than 1 turn.
-- Consistent timing
-- No jittering or stalling
-
-**Test Result**:
-
-- [ ] PASS
-- [ ] SKIPPED
-
----
-
-#### 5.8 Maximum Speed Test
-
-**Procedure**:
-
-1. Gradually increase speed:
-
-   - `SPEED 1000` → move
-   - `SPEED 2000` → move
-   - `SPEED 5000` → move
-   - Continue until step loss
-
-**Expected Results**:
-
-- Identify maximum reliable speed
-- Step loss detection if available
-- Document speed limit for motor
-
-**Test Result**:
-
-- [ ] PASS
-- [ ] SKIPPED
-
----
-
-### Phase 6: Long-Duration Tests
-
-#### 6.1 Endurance Test
-
-**Procedure**:
-
-1. Run continuous back-and-forth motion
-2. Log motor temperature every 10 minutes
-3. Run for 4+ hours
-
-**Expected Results**:
-
-- Temperature stabilizes below thermal limit
-- No drift in position
-- No UART communication errors
-
-**Test Result**:
-
-- [ ] PASS
-- [ ] SKIPPED
-
----
-
-#### 6.2 Position Accuracy Test
-
-**Procedure**:
-
-1. Mark motor shaft position
-2. Run 10,000 cycles of MOVE 200, MOVE -200
-3. Check shaft position matches mark
-
-**Expected Results**:
-
-- Zero position error after 10,000 cycles
-- If error exists, document magnitude
-
-**Test Result**:
-
-- [ ] PASS
-- [ ] SKIPPED
-
----
-
-## 5. Test Logging Template
+**Commands**:
 
 ```
-Date: _______________
-Tester: _______________
-Firmware Version: _______________
-
-Test: _______________
-Configuration:
-  - Driver: TMC2209 / TMC2208 / DC Motor
-  - Current: _____ mA
-  - Speed: _____ steps/sec
-  - Acceleration: _____ steps/sec²
-  - Microsteps: _____
-  - Profile: Trapezoidal / S-Curve / Constant
-
-Procedure:
-1. _______________________
-2. _______________________
-3. _______________________
-
-Observations:
-_________________________
-_________________________
-
-Result: PASS / FAIL
-
-Notes:
-_________________________
+run forward
+stop
+get pos
 ```
 
----
+**Expected Results**:
 
-## 6. Troubleshooting Quick Reference
+- `stop` immediately halts motor
+- Position tracking remains accurate
 
-| Symptom                         | Likely Cause       | Solution                              |
-| ------------------------------- | ------------------ | ------------------------------------- |
-| No serial output                | USB not recognized | Check driver, try different cable     |
-| Wrong driver detected           | Detection jumpers  | Check GPIO 10-13 wiring               |
-| UART timeout                    | Resistor missing   | Add 1kΩ between TX and RX             |
-| Motor vibrates but doesn't move | Current too low    | Increase current setting              |
-| Motor overheats                 | Current too high   | Reduce current, improve cooling       |
-| Step loss at high speed         | Speed too high     | Reduce max speed, increase current    |
-| Jerky S-curve motion            | Jerk too high      | Reduce jerk parameter                 |
-| Motor stalls mid-move           | Load too high      | Increase current, reduce acceleration |
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
 
 ---
 
-## 7. Sign-Off
+### Phase 5: DC Motor Tests
+
+---
+
+#### 5.1 DC Motor Detection
+
+**Procedure**: Connect DC motor jumper (GPIO 11 HIGH)
+
+**Expected**: System detects DC Motor mode
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 5.2 DC Motor Speed Control
+
+**Commands**:
+
+```
+set speed 64
+run forward
+set speed 128
+set speed 255
+stop
+```
+
+**Expected Results**: Variable speed operation
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+### Phase 6: Help & Status Commands
+
+---
+
+#### 6.1 Help Command
+
+**Command**: `help`
+
+**Expected**: Full list of available commands displayed
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 6.2 Status Command
+
+**Command**: `status`
+
+**Expected**: Motor state, position, speed, configuration displayed
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+#### 6.3 Diagnostics Command
+
+**Command**: `diag`
+
+**Expected**: TMC2209 register values and flags
+
+##### Test Result
+
+- [ ] PASS
+- [ ] FAILED
+- [ ] SKIPPED
+
+---
+
+## 5. Test Results Summary
+
+| Test Phase | Tests | Passed | Failed | Skipped |
+|------------|-------|--------|--------|---------|
+| Phase 1: Basic System | 4 | | | |
+| Phase 2: TMC2209 | 15 | | | |
+| Phase 3: Precision | 3 | | | |
+| Phase 4: Edge Cases | 3 | | | |
+| Phase 5: DC Motor | 2 | | | |
+| Phase 6: Commands | 3 | | | |
+| **TOTAL** | **30** | | | |
+
+---
+
+## 6. Sign-Off
 
 | Test Phase            | Completed By | Date | Result |
 | --------------------- | ------------ | ---- | ------ |
 | Phase 1: Basic System |              |      |        |
 | Phase 2: TMC2209      |              |      |        |
-| Phase 3: TMC2208      |              |      |        |
-| Phase 4: DC Motor     |              |      |        |
-| Phase 5: Edge Cases   |              |      |        |
-| Phase 6: Endurance    |              |      |        |
+| Phase 3: Precision    |              |      |        |
+| Phase 4: Edge Cases   |              |      |        |
+| Phase 5: DC Motor     |              |      |        |
+| Phase 6: Commands     |              |      |        |
 
-**Final Approval**: _ Date: __
+**Final Approval**: _________________ Date: _________________
+
+---
+
+*Last updated: January 2026 - v2.0 FastAccelStepper*

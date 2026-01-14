@@ -189,6 +189,40 @@ void StatusLED::playRebootAnimation() {
     delay(100);
 }
 
+void StatusLED::playStartupSequence() {
+    // Stop any current animation
+    _animation = AnimationType::ANIM_NONE;
+    
+    // Color Chase: Red → Green → Blue → White → Off
+    // Quick flashes indicating fresh boot
+    
+    // Red flash
+    applyColor(255, 0, 0);
+    delay(150);
+    applyColor(0, 0, 0);
+    delay(50);
+    
+    // Green flash
+    applyColor(0, 255, 0);
+    delay(150);
+    applyColor(0, 0, 0);
+    delay(50);
+    
+    // Blue flash
+    applyColor(0, 0, 255);
+    delay(150);
+    applyColor(0, 0, 0);
+    delay(50);
+    
+    // White flash
+    applyColor(255, 255, 255);
+    delay(150);
+    
+    // Final off
+    applyColor(0, 0, 0);
+    delay(100);
+}
+
 void StatusLED::setColor(uint8_t r, uint8_t g, uint8_t b) {
     // Set as new base color
     _baseColor = LEDColor(r, g, b);

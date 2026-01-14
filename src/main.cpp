@@ -59,6 +59,12 @@ constexpr uint32_t IDLE_TIMEOUT_MS = 5000;  // 5 seconds to idle
 void setup() {
     // Initialize status LED first (shows we're alive)
     statusLED.begin();
+    
+    // Play startup sequence immediately (RGB chase)
+    // This indicates a fresh boot/reboot
+    statusLED.playStartupSequence();
+    
+    // Now show initializing status
     statusLED.setStatus(SystemStatus::INITIALIZING);
     
     // Initialize USB Serial

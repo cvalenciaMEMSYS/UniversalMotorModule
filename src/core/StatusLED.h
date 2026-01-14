@@ -175,6 +175,13 @@ public:
     void playRebootAnimation();
     
     /**
+     * @brief Play startup sequence (blocking)
+     * RGB chase: Red → Green → Blue → White → Off
+     * Called immediately after boot to indicate fresh start.
+     */
+    void playStartupSequence();
+    
+    /**
      * @brief Set custom color directly
      * This becomes the "base" color that will be restored after animations.
      * @param r Red (0-255)

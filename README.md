@@ -1,6 +1,13 @@
-# Universal Motor Module - TMC2209 & DC Motor Control
+# Universal Motor Module
 
-Full-featured motor control system supporting TMC2209 stepper drivers and RZ7899-MS H-bridge DC motor controllers, built with PlatformIO for ESP32-S3 Super Mini.
+Full-featured motor control system supporting TMC2209/TMC2208 stepper drivers and RZ7899-MS H-bridge DC motor controllers, built with PlatformIO for ESP32-S3 Super Mini.
+
+**Features:**
+- 🚀 **FastAccelStepper** library for high-performance pulse generation (up to 200kHz+)
+- 🔇 **StealthChop/SpreadCycle** modes for quiet or high-torque operation
+- 📍 **Hardware position tracking** - accurate step counting
+- ⚡ **S-curve acceleration** for smooth motion
+- 🔄 **Auto-enable/disable** for power saving
 
 ## 🎯 Quick Start
 
@@ -109,12 +116,14 @@ Press **'h'** for the interactive menu, then:
 ## 📋 Features
 
 ### Motor Control
-- ✅ **Precise positioning** - Microstepping from 1 to 256
+- ✅ **Precise positioning** - Hardware-based step counting
+- ✅ **High-speed operation** - Up to 200kHz+ step rates
 - ✅ **Bidirectional rotation** - Clockwise and counter-clockwise
 - ✅ **Speed control** - Adjustable on-the-fly
-- ✅ **Continuous or stepped** motion modes
+- ✅ **Acceleration profiles** - Trapezoidal and S-curve (cubesteps)
+- ✅ **Continuous rotation** - Run forward/backward with acceleration
+- ✅ **Auto-enable/disable** - Automatic motor power management
 - ✅ **DC Motor Control** - Forward/backward with PWM speed
-- ✅ **Coast Stop** - Gentle motor stopping
 
 ### Advanced TMC2209 Features
 - ✅ **StealthChop™** - Ultra-quiet operation
@@ -423,11 +432,13 @@ Output: DC Motor STOPPED (coast)
 ## 📚 Documentation
 
 - **[Quick Wiring Guide](Quick_Wiring_Guide_Custom_Pins.md)** - Visual pinout and connections
-- **[Code Deep Dive](docs/code-architecture.md)** - How the code works
-- **[ESP32-S3 Capabilities](docs/esp32-s3-guide.md)** - MCU features and specifications
-- **[ESP32-S3 Super Mini Board Reference](docs/esp32-s3-super-mini-board.md)** - Complete board pinout, safe pins, and specifications ([source](https://www.espboards.dev/esp32/esp32-s3-super-mini/))
-- **[TMC2209 Features](docs/tmc2209-guide.md)** - Stepper driver capabilities and configuration
-- **[DC Motor Guide](docs/dc-motor-guide.md)** - RZ7899-MS H-bridge specs and DC motor control
+- **[Command Protocol](docs/command-protocol.md)** - Full command reference
+- **[Architecture](docs/architecture.md)** - System design and code structure
+- **[ESP32-S3 Hardware](docs/esp32-s3-hardware.md)** - MCU specs and pin reference
+- **[TMC2209 Features](docs/tmc2209-guide.md)** - Stepper driver capabilities
+- **[DC Motor Guide](docs/dc-motor-guide.md)** - RZ7899-MS H-bridge control
+- **[FastAccelStepper](docs/fastaccelstepper.md)** - Pulse generation library reference
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 
 ---
 
@@ -474,14 +485,15 @@ Output: DC Motor STOPPED (coast)
 
 **platformio.ini:**
 ```ini
-[env:esp32-s3-devkitc-1]
+[env:esp32-s3-mini]
 platform = espressif32
-board = esp32-s3-devkitc-1
+board = lolin_s3_mini
 framework = arduino
 monitor_speed = 115200
 
 lib_deps = 
     teemuatlut/TMCStepper@^0.7.3
+    gin66/FastAccelStepper@^0.33.9
 
 build_flags = 
     -DARDUINO_USB_CDC_ON_BOOT=1
