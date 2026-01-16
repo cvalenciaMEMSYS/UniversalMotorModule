@@ -109,10 +109,22 @@ bool TMC2209Driver::init() {
         configureDriver();
     }
     
-    Serial.println("TMC2209 Driver: Ready");
+    // SAFE STARTUP: Enable auto-disable mode (motor auto-enables for moves, then disables)
+    // This prevents the motor from drawing current when idle
+    setAutoDisable(DefaultMotorConfig::STEPPER_AUTO_DISABLE);
+    Serial.print("TMC2209 Driver: Auto-disable ");
+    Serial.println(DefaultMotorConfig::STEPPER_AUTO_DISABLE ? "ON" : "OFF");
     
-    // Enable driver
-    enable();
+    Serial.println("TMC2209 Driver: Ready");
+    Serial.print("TMC2209 Driver: Startup current = ");
+    Serial.print(_runCurrentMA);
+    Serial.println(" mA");
+    
+    // SAFE STARTUP: Keep motor DISABLED on boot
+    // User must explicitly enable with 'enable' command
+    // Note: If auto-disable is ON, motor will auto-enable when a move is commanded
+    disable();
+    Serial.println("TMC2209 Driver: Motor DISABLED on startup (safe mode)");
     
     return true;
 }

@@ -84,8 +84,10 @@ bool DCMotorDriver::init() {
     Serial.print(_maxDuty);
     Serial.println(")");
     
-    // Enable the driver
-    enable();
+    // SAFE STARTUP: Keep motor DISABLED on boot
+    // User must explicitly enable with 'enable' command
+    disable();
+    Serial.println("DC Motor Driver: Motor DISABLED on startup (safe mode)");
     
     return true;
 }

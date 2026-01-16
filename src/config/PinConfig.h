@@ -81,12 +81,13 @@ constexpr uint8_t LED_PIN         = 48;   // WS2812 NeoPixel LED
 // These are startup defaults, can be changed at runtime via commands
 
 namespace DefaultMotorConfig {
-    // Stepper defaults
-    constexpr uint16_t STEPPER_CURRENT_MA    = 400;   // Safe default current
+    // Stepper defaults - SAFE STARTUP: low current, motor disabled
+    constexpr uint16_t STEPPER_CURRENT_MA    = 100;   // Safe startup current (100mA)
     constexpr uint16_t STEPPER_HOLD_CURRENT  = 0;     // No hold current (for non-backdrivable)
     constexpr uint16_t STEPPER_MICROSTEPS    = 16;    // 16x microstepping
     constexpr float    STEPPER_MAX_SPEED     = 1000.0f; // Steps per second
     constexpr float    STEPPER_ACCELERATION  = 500.0f;  // Steps per second²
+    constexpr bool     STEPPER_AUTO_DISABLE  = true;   // Auto-disable after moves (safe startup)
     
     // DC motor defaults
     constexpr float    DC_MAX_SPEED          = 1.0f;  // Full speed (0.0 - 1.0)

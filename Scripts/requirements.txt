@@ -1,0 +1,22 @@
+# Energy Measurement Test System - Requirements
+# Install with: pip install -r requirements.txt
+
+# GUI Framework
+PyQt6>=6.5.0
+
+# Data Storage & Processing
+h5py>=3.9.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+
+# Serial Communication (DUT)
+pyserial>=3.5
+
+# Joulescope Power Analyzer
+joulescope>=1.0.0
+
+# Configuration
+pyyaml>=6.0
+
+# Excel Export (optional)
+openpyxl>=3.1.0
