@@ -1253,8 +1253,17 @@ class OrchestratorWindow(QMainWindow):
         # Start data collection in thread
         self.test_start_time = time.time()
         
-        # Start Joulescope streaming
+        # Capture all UI values before spawning threads (thread safety)
         sample_rate = int(self.js_rate_combo.currentText())
+        fd_mode_str = self.fd_mode_combo.currentText() if hasattr(self, 'fd_mode_combo') else "MONITOR"
+        fd_speed = self.fd_speed_spin.value() if hasattr(self, 'fd_speed_spin') else 1.0
+        fd_rate = self.fd_rate_spin.value() if hasattr(self, 'fd_rate_spin') else 100
+        dut_profile_str = self.profile_combo.currentText()
+        dut_speed = self.speed_spin.value()
+        dut_accel = self.accel_spin.value()
+        dut_steps = self.steps_spin.value()
+        
+        # Start Joulescope streaming
         threading.Thread(
             target=self._joulescope_worker,
             args=(sample_rate,),
@@ -1264,11 +1273,11 @@ class OrchestratorWindow(QMainWindow):
         # Start FD streaming if connected
         if self.fd_client and self.fd_client.is_connected:
             # Set mode
-            mode = FDMode.BACKDRIVE if self.fd_mode_combo.currentText() == "BACKDRIVE" else FDMode.MONITOR
+            mode = FDMode.BACKDRIVE if fd_mode_str == "BACKDRIVE" else FDMode.MONITOR
             self.fd_client.set_mode(mode)
             if mode == FDMode.BACKDRIVE:
-                self.fd_client.set_speed(self.fd_speed_spin.value())
-            self.fd_client.set_sample_rate(self.fd_rate_spin.value())
+                self.fd_client.set_speed(fd_speed)
+            self.fd_client.set_sample_rate(fd_rate)
             
             threading.Thread(
                 target=self._fd_worker,
@@ -1277,8 +1286,16 @@ class OrchestratorWindow(QMainWindow):
         
         # Start DUT motion if connected
         if self.dut and self.dut.is_connected:
+            # Create config dict for worker thread (thread-safe)
+            dut_config = {
+                'profile': dut_profile_str,
+                'speed': dut_speed,
+                'accel': dut_accel,
+                'steps': dut_steps
+            }
             threading.Thread(
                 target=self._dut_worker,
+                args=(dut_config,),
                 daemon=True
             ).start()
     
@@ -1286,19 +1303,21 @@ class OrchestratorWindow(QMainWindow):
         """Stop the test"""
         self.is_testing = False
         
-        # Stop Joulescope
+        # Stop Joulescope and capture complete data
+        js_power_data = None
         if self.joulescope:
             try:
-                self.joulescope.stop_streaming()
-            except:
-                pass
+                js_power_data = self.joulescope.stop_streaming()
+            except Exception as e:
+                self._log(f"Joulescope stop error: {e}", "ERROR")
         
-        # Stop FD
+        # Stop FD and capture complete data
+        fd_force_data = None
         if self.fd_client and self.fd_client.is_connected:
             try:
-                self.fd_client.stop()
-            except:
-                pass
+                fd_force_data = self.fd_client.stop()
+            except Exception as e:
+                self._log(f"FD stop error: {e}", "ERROR")
         
         # Stop DUT
         if self.dut and self.dut.is_connected:
@@ -1315,8 +1334,8 @@ class OrchestratorWindow(QMainWindow):
         
         self._log("Test stopped", "INFO")
         
-        # Save data
-        self._save_test_data()
+        # Save data - pass the complete data objects
+        self._save_test_data(js_power_data, fd_force_data)
     
     def _joulescope_worker(self, sample_rate: int):
         """Worker thread for Joulescope data collection"""
@@ -1360,28 +1379,37 @@ class OrchestratorWindow(QMainWindow):
         except Exception as e:
             self._log(f"FD error: {e}", "ERROR")
     
-    def _dut_worker(self):
-        """Worker thread for DUT motion"""
+    def _dut_worker(self, config: dict):
+        """
+        Worker thread for DUT motion
+        
+        Args:
+            config: Dictionary with pre-captured UI values:
+                - profile: Motion profile string
+                - speed: Steps per second
+                - accel: Acceleration
+                - steps: Number of steps to move
+        """
         try:
             if self.dut is None:
                 return
             
-            # Configure profile
+            # Configure profile using captured values (thread-safe)
             profile_map = {
                 "Constant Velocity": MotionProfile.CONSTANT,
                 "Trapezoidal": MotionProfile.TRAPEZOIDAL,
                 "S-Curve": MotionProfile.SCURVE
             }
-            profile = profile_map[self.profile_combo.currentText()]
+            profile = profile_map.get(config['profile'], MotionProfile.CONSTANT)
             
             self.dut.configure_profile(
                 profile=profile,
-                speed=self.speed_spin.value(),
-                accel=self.accel_spin.value()
+                speed=config['speed'],
+                accel=config['accel']
             )
             
             # Start motion
-            steps = self.steps_spin.value()
+            steps = config['steps']
             if steps > 0:
                 self.dut.move(steps)
             else:
@@ -1402,12 +1430,24 @@ class OrchestratorWindow(QMainWindow):
         except Exception as e:
             self._log(f"DUT error: {e}", "ERROR")
     
-    def _save_test_data(self):
-        """Save collected test data to HDF5"""
+    def _save_test_data(self, js_power_data=None, fd_force_data=None):
+        """
+        Save collected test data to HDF5
+        
+        Args:
+            js_power_data: PowerData from Joulescope stop_streaming() (complete data)
+            fd_force_data: ForceData from FD client stop() (complete data)
+        """
         if not self.hdf5_manager:
             return
         
-        if not self.power_buffer and not self.force_buffer:
+        # Prefer complete data from stop() calls, fall back to buffers
+        has_power = (js_power_data is not None and hasattr(js_power_data, 'sample_count') 
+                     and js_power_data.sample_count > 0) or self.power_buffer
+        has_force = (fd_force_data is not None and hasattr(fd_force_data, 'total_samples')
+                     and fd_force_data.total_samples > 0) or self.force_buffer
+        
+        if not has_power and not has_force:
             self._log("No data to save", "WARNING")
             return
         
@@ -1425,24 +1465,45 @@ class OrchestratorWindow(QMainWindow):
                 notes=self.notes_edit.text()
             )
             
-            # Create power data
+            # Create power data - prefer complete data from stop_streaming()
             power_data: Optional[PowerRawData] = None
-            if self.power_buffer:
+            if js_power_data is not None and hasattr(js_power_data, 'sample_count') and js_power_data.sample_count > 0:
+                # Use complete Joulescope data
+                power_data = PowerRawData(
+                    time_ms=js_power_data.timestamps_ms,
+                    current_a=js_power_data.current_a,
+                    voltage_v=js_power_data.voltage_v,
+                    power_w=js_power_data.power_w
+                )
+                self._log(f"Using complete Joulescope data: {js_power_data.sample_count} samples", "INFO")
+            elif self.power_buffer:
+                # Fall back to polled buffer
                 power_data = PowerRawData(
                     time_ms=np.array([d.timestamp_ms for d in self.power_buffer]),
                     current_a=np.array([d.current_a for d in self.power_buffer]),
                     voltage_v=np.array([d.voltage_v for d in self.power_buffer]),
                     power_w=np.array([d.power_w for d in self.power_buffer])
                 )
+                self._log(f"Using polled power buffer: {len(self.power_buffer)} samples", "WARNING")
             
-            # Create force data
+            # Create force data - prefer complete data from stop()
             force_data: Optional[ForceRawData] = None
-            if self.force_buffer:
+            if fd_force_data is not None and hasattr(fd_force_data, 'total_samples') and fd_force_data.total_samples > 0:
+                # Use complete FD data
+                force_data = ForceRawData(
+                    time_ms=np.array(fd_force_data.timestamps_ms),
+                    force_n=np.array(fd_force_data.force_n),
+                    position_mm=np.array(fd_force_data.position_mm)
+                )
+                self._log(f"Using complete FD data: {fd_force_data.total_samples} samples", "INFO")
+            elif self.force_buffer:
+                # Fall back to polled buffer
                 force_data = ForceRawData(
                     time_ms=np.array([d.timestamp_ms for d in self.force_buffer]),
                     force_n=np.array([d.force_n for d in self.force_buffer]),
                     position_mm=np.array([d.position_mm for d in self.force_buffer])
                 )
+                self._log(f"Using polled force buffer: {len(self.force_buffer)} samples", "WARNING")
             
             # Save test to HDF5
             test_id = metadata.test_id
