@@ -51,11 +51,13 @@ class TestConfig:
     dut_accel: int = 0              # steps/sec² (0 = auto from speed)
     dut_cubesteps: int = 0          # S-curve jerk parameter
     dut_travel_steps: int = 1000    # Steps to move forward
+    dut_reverse: bool = False       # Reverse DUT direction
     
     # FD parameters  
     fd_speed: float = 10.0          # mm/s
     fd_distance: float = 10.0       # mm for DRIVE mode
     fd_mode: str = "MONITOR"        # MONITOR or DRIVE
+    fd_reverse: bool = False        # Reverse FD direction
     
     # Options
     auto_retract: bool = True       # Auto-retract after test
@@ -280,10 +282,18 @@ class OrchestratorNoJS(QMainWindow):
         self.dut_travel_spin.setValue(1000)
         layout.addWidget(self.dut_travel_spin, 1, 3)
         
-        # Auto-retract option
-        self.dut_retract_check = QCheckBox("Auto-retract (50% of travel)")
+        # Options row
+        options_layout = QHBoxLayout()
+        
+        self.dut_retract_check = QCheckBox("Auto-retract (50%)")
         self.dut_retract_check.setChecked(True)
-        layout.addWidget(self.dut_retract_check, 2, 0, 1, 2)
+        options_layout.addWidget(self.dut_retract_check)
+        
+        self.dut_reverse_check = QCheckBox("Reverse Direction")
+        self.dut_reverse_check.setToolTip("Invert forward/backward direction for DUT movement")
+        options_layout.addWidget(self.dut_reverse_check)
+        
+        layout.addLayout(options_layout, 2, 0, 1, 4)
         
         # DUT manual controls
         dut_btn_layout = QHBoxLayout()
@@ -324,6 +334,24 @@ class OrchestratorNoJS(QMainWindow):
         jog_layout.addWidget(jog_pos_btn)
         
         layout.addWidget(jog_frame, 4, 0, 1, 4)
+        
+        # Manual command input for DUT (set current limits, etc.)
+        cmd_frame = QFrame()
+        cmd_layout = QHBoxLayout(cmd_frame)
+        cmd_layout.setContentsMargins(0, 0, 0, 0)
+        
+        cmd_layout.addWidget(QLabel("Command:"))
+        
+        self.dut_cmd_edit = QLineEdit()
+        self.dut_cmd_edit.setPlaceholderText("e.g., C1000 (set current limit)")
+        self.dut_cmd_edit.returnPressed.connect(self._dut_send_command)
+        cmd_layout.addWidget(self.dut_cmd_edit)
+        
+        send_cmd_btn = QPushButton("Send")
+        send_cmd_btn.clicked.connect(self._dut_send_command)
+        cmd_layout.addWidget(send_cmd_btn)
+        
+        layout.addWidget(cmd_frame, 5, 0, 1, 4)
         
         return group
     
@@ -387,6 +415,11 @@ class OrchestratorNoJS(QMainWindow):
         self.fd_zero_btn = QPushButton("Zero / Tare")
         self.fd_zero_btn.clicked.connect(self._fd_zero)
         zero_layout.addWidget(self.fd_zero_btn)
+        
+        # Reverse direction checkbox
+        self.fd_reverse_check = QCheckBox("Reverse Dir")
+        self.fd_reverse_check.setToolTip("Invert forward/backward direction for FD movement")
+        zero_layout.addWidget(self.fd_reverse_check)
         
         # Force inversion checkbox
         self.fd_invert_check = QCheckBox("Invert Force (×-1)")
@@ -590,6 +623,10 @@ class OrchestratorNoJS(QMainWindow):
             self.log("DUT not connected", "error")
             return
         
+        # Apply direction reversal if enabled
+        if self.dut_reverse_check.isChecked():
+            steps = -steps
+        
         direction = "forward" if steps > 0 else "backward"
         self.log(f"Jogging DUT {abs(steps)} steps {direction}...", "info")
         
@@ -600,6 +637,32 @@ class OrchestratorNoJS(QMainWindow):
             self.log("DUT jog started", "success")
         else:
             self.log("DUT jog failed", "error")
+    
+    def _dut_send_command(self):
+        """Send a manual command to the DUT (ESP32)"""
+        if not self.dut_controller or not self.dut_controller.is_connected:
+            self.log("DUT not connected", "error")
+            return
+        
+        cmd = self.dut_cmd_edit.text().strip()
+        if not cmd:
+            return
+        
+        self.log(f"Sending to DUT: {cmd}", "info")
+        
+        try:
+            response = self.dut_controller.send_raw_command(cmd)
+            if response:
+                # Join response lines if multiple
+                resp_text = " | ".join(response) if isinstance(response, list) else str(response)
+                self.log(f"DUT response: {resp_text}", "success")
+            else:
+                self.log("DUT: No response (command sent)", "info")
+        except Exception as e:
+            self.log(f"DUT command error: {e}", "error")
+        
+        # Clear the input
+        self.dut_cmd_edit.clear()
     
     def _apply_dut_settings(self):
         """Apply current DUT settings"""
@@ -651,6 +714,10 @@ class OrchestratorNoJS(QMainWindow):
         if not self.fd_client or not self.fd_client.is_connected:
             self.log("FD not connected", "error")
             return
+        
+        # Apply direction reversal if enabled
+        if self.fd_reverse_check.isChecked():
+            distance_mm = -distance_mm
         
         self.log(f"Jogging FD {distance_mm} mm...", "info")
         
@@ -718,9 +785,11 @@ class OrchestratorNoJS(QMainWindow):
             dut_accel=self.dut_accel_spin.value(),
             dut_cubesteps=self.dut_cubesteps_spin.value(),
             dut_travel_steps=self.dut_travel_spin.value(),
+            dut_reverse=self.dut_reverse_check.isChecked(),
             fd_speed=self.fd_speed_spin.value(),
             fd_distance=self.fd_distance_spin.value(),
             fd_mode=self.fd_mode_combo.currentText(),
+            fd_reverse=self.fd_reverse_check.isChecked(),
             auto_retract=self.dut_retract_check.isChecked(),
             retract_ratio=0.5
         )
@@ -806,13 +875,18 @@ class OrchestratorNoJS(QMainWindow):
         self.dut_controller.enable()
         time.sleep(0.1)
         
-        self.signals.log_signal.emit(f"DUT moving forward: {config.dut_travel_steps} steps...", "info")
-        self.dut_controller.move(config.dut_travel_steps, wait=True, timeout=30.0)
+        # Apply direction reversal
+        travel_steps = config.dut_travel_steps
+        if config.dut_reverse:
+            travel_steps = -travel_steps
         
-        # 5. Retract DUT
+        self.signals.log_signal.emit(f"DUT moving forward: {config.dut_travel_steps} steps...", "info")
+        self.dut_controller.move(travel_steps, wait=True, timeout=30.0)
+        
+        # 5. Retract DUT (always opposite direction)
         if config.auto_retract:
-            retract_steps = int(config.dut_travel_steps * config.retract_ratio)
-            self.signals.log_signal.emit(f"DUT retracting: {-retract_steps} steps...", "info")
+            retract_steps = int(travel_steps * config.retract_ratio)
+            self.signals.log_signal.emit(f"DUT retracting...", "info")
             self.dut_controller.move(-retract_steps, wait=True, timeout=30.0)
         
         result.dut_end_pos = self.dut_controller.get_position() or 0
@@ -854,8 +928,13 @@ class OrchestratorNoJS(QMainWindow):
         self.fd_client.set_speed(config.fd_speed)
         
         # 3. FD moves forward while recording force (DRIVE command does this automatically)
+        # Apply direction reversal
+        fd_distance = config.fd_distance
+        if config.fd_reverse:
+            fd_distance = -fd_distance
+        
         self.signals.log_signal.emit(f"FD moving and recording: {config.fd_distance} mm at {config.fd_speed} mm/s...", "info")
-        force_data = self.fd_client.move(config.fd_distance)
+        force_data = self.fd_client.move(fd_distance)
         
         if force_data and len(force_data.timestamps_ms) > 0:
             result.force_data = force_data
