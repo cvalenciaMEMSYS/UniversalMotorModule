@@ -31,8 +31,8 @@ Generated: 2026-01-30 14:25:04
 
 | Test ID | Direction | Max Force (N) | Mean Force (N) |
 |---------|-----------|---------------|----------------|
-| M1-BD-OFF-Rigid | Rigid | N/A | N/A |
-| M1-BD-OFF-Spring | Spring | N/A | N/A |
+| M1-BD-OFF-Rigid | Rigid | 10.39 | 2.80 |
+| M1-BD-OFF-Spring | Spring | 8.17 | 4.63 |
 
 ## Best Configuration Summary
 
