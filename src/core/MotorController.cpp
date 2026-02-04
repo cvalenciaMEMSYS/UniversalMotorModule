@@ -159,14 +159,18 @@ void MotorController::processCommand(const String& cmd) {
         moveBy(steps);
     }
     else if (command.startsWith("abs ")) {
-        // Absolute move: "abs 1000"
+        // Absolute move: "abs 1000" (for steppers: position, for DC: speed %)
         String valueStr = command.substring(4);
         valueStr.trim();
         
-        // FIX #5: Validate input
+        // Check if DC motor - allows negative values for reverse direction
+        bool isDCMotor = (_driver != nullptr && _driver->getType() == MotorType::DC_MOTOR);
+        
+        // Validate input - allow leading minus for DC motors
         bool validNumber = true;
         for (size_t i = 0; i < valueStr.length(); i++) {
             char c = valueStr.charAt(i);
+            if (i == 0 && c == '-' && isDCMotor) continue;  // Allow negative for DC
             if (c < '0' || c > '9') {
                 validNumber = false;
                 break;
@@ -174,16 +178,27 @@ void MotorController::processCommand(const String& cmd) {
         }
         
         if (!validNumber || valueStr.length() == 0) {
-            Serial.println("ERROR: Invalid position value (must be non-negative integer)");
+            if (isDCMotor) {
+                Serial.println("ERROR: Invalid speed value (must be -100 to +100)");
+            } else {
+                Serial.println("ERROR: Invalid position value (must be non-negative integer)");
+            }
             return;
         }
         
         int32_t position = valueStr.toInt();
         
-        // FIX #5: Validate position range
-        if (position < 0 || position > MotorLimits::MAX_POSITION) {
-            Serial.printf("ERROR: Position must be 0 to %ld\n", (long)MotorLimits::MAX_POSITION);
-            return;
+        // Validate range - different for DC vs stepper
+        if (isDCMotor) {
+            if (position < -100 || position > 100) {
+                Serial.println("ERROR: Speed must be -100 to +100");
+                return;
+            }
+        } else {
+            if (position < 0 || position > MotorLimits::MAX_POSITION) {
+                Serial.printf("ERROR: Position must be 0 to %ld\n", (long)MotorLimits::MAX_POSITION);
+                return;
+            }
         }
         
         moveTo(position);
@@ -202,12 +217,12 @@ void MotorController::processCommand(const String& cmd) {
             _driver->brake();
         }
     }
-    else if (command == "run forward" || command == "runforward") {
+    else if (command == "run forward" || command == "runforward" || command == "run f") {
         if (_driver != nullptr) {
             _driver->runForward();
         }
     }
-    else if (command == "run backward" || command == "runbackward") {
+    else if (command == "run backward" || command == "runbackward" || command == "run b") {
         if (_driver != nullptr) {
             _driver->runBackward();
         }

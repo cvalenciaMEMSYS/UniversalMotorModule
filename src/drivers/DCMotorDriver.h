@@ -84,6 +84,10 @@ public:
     bool isMoving() const override;
     void update() override;
     
+    void runForward() override;
+    void runBackward() override;
+    void brake() override;
+    
     /**
      * @brief Set maximum speed (duty cycle 0-100%)
      * @param stepsPerSecond For DC motor: max duty cycle percentage
@@ -102,6 +106,12 @@ public:
     bool isStalling() override { return false; }
     void printDiagnostics() override;
     bool testConnection() override { return true; }
+    
+    // Query methods for status/debugging
+    int32_t getTargetPosition() const override;
+    int32_t getActualSpeed() const override;
+    uint8_t getRampState() const override;
+    bool isRunningContinuously() const override;
     
     // =========================================================================
     // DC Motor-Specific Methods
@@ -123,11 +133,6 @@ public:
      * @brief Coast (motor free-wheels)
      */
     void coast();
-    
-    /**
-     * @brief Brake (motor locked)
-     */
-    void brake();
 
 private:
     // Hardware configuration

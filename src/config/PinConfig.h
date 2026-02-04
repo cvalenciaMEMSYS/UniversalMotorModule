@@ -62,8 +62,8 @@ constexpr float    TMC_R_SENSE    = 0.11f; // BigTreeTech TMC2209 v1.3 sense res
 //   IN1=LOW,  IN2=LOW  → Coast (motor free)
 //   IN1=HIGH, IN2=HIGH → Brake (motor locked)
 
-constexpr uint8_t DC_IN1_PIN      = 7;    // H-bridge input 1 (PWM capable)
-constexpr uint8_t DC_IN2_PIN      = 8;    // H-bridge input 2 (PWM capable)
+constexpr uint8_t DC_IN1_PIN      = 8;    // H-bridge input 1 (PWM capable)
+constexpr uint8_t DC_IN2_PIN      = 9;    // H-bridge input 2 (PWM capable)
 constexpr uint8_t DC_PWM_CHANNEL  = 0;    // ESP32 LEDC channel for PWM
 constexpr uint32_t DC_PWM_FREQ    = 20000; // 20kHz PWM frequency (ultrasonic)
 constexpr uint8_t DC_PWM_RES      = 10;   // 10-bit resolution (0-1023)

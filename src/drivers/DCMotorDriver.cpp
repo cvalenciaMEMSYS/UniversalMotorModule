@@ -68,13 +68,17 @@ bool DCMotorDriver::init() {
     ledcWrite(_pwmChannel1, 0);
     ledcWrite(_pwmChannel2, 0);
     
-    _enabled = false;
+    _enabled = true;  // DC motors work without explicit enable
     _currentSpeed = 0;
     _targetSpeed = 0;
     _virtualPosition = 0;
     _moving = false;
     
     Serial.println("DC Motor Driver: Ready");
+    Serial.print("  IN1 Pin: GPIO ");
+    Serial.println(_in1Pin);
+    Serial.print("  IN2 Pin: GPIO ");
+    Serial.println(_in2Pin);
     Serial.print("  PWM Frequency: ");
     Serial.print(_pwmFreq);
     Serial.println(" Hz");
@@ -84,10 +88,8 @@ bool DCMotorDriver::init() {
     Serial.print(_maxDuty);
     Serial.println(")");
     
-    // SAFE STARTUP: Keep motor DISABLED on boot
-    // User must explicitly enable with 'enable' command
-    disable();
-    Serial.println("DC Motor Driver: Motor DISABLED on startup (safe mode)");
+    // Motor starts in coast mode (both pins LOW)
+    Serial.println("DC Motor Driver: Ready - motor coasting");
     
     return true;
 }
@@ -97,15 +99,17 @@ bool DCMotorDriver::init() {
 // =============================================================================
 
 void DCMotorDriver::enable() {
-    _enabled = true;
-    // For H-bridge, "enabled" just means we allow speed commands
-    // Actual motor state depends on current speed setting
+    // DC motors don't have an enable/disable concept like steppers
+    // Commands work immediately without needing to enable first
+    _enabled = true;  // Keep for API compatibility
+    Serial.println("DC Motor: Ready (no enable required - commands work immediately)");
 }
 
 void DCMotorDriver::disable() {
     coast();  // Free-wheel stop
     _enabled = false;
     _moving = false;
+    Serial.println("DC Motor: Coasting (freewheeling)");
 }
 
 bool DCMotorDriver::isEnabled() const {
@@ -140,10 +144,10 @@ void DCMotorDriver::move(int32_t steps) {
 }
 
 void DCMotorDriver::moveTo(int32_t position) {
-    // For DC motor: position represents speed setpoint (-1000 to +1000)
-    // This allows the stepper API to control DC motor speed
+    // For DC motor: position represents speed percentage (-100 to +100)
+    // Examples: abs 100 = full forward, abs -50 = half backward, abs 0 = stop
     
-    float speed = constrain(position, -1000, 1000) / 1000.0f;
+    float speed = constrain(position, -100, 100) / 100.0f;
     speed *= _maxSpeedLimit;
     
     _targetSpeed = speed;
@@ -157,6 +161,8 @@ void DCMotorDriver::moveTo(int32_t position) {
     
     _moving = (_targetSpeed != 0);
     _lastUpdateTime = millis();
+    
+    Serial.printf("DC Motor: Speed set to %d%% (target: %.2f)\n", position, _targetSpeed);
 }
 
 void DCMotorDriver::stop() {
@@ -178,20 +184,54 @@ void DCMotorDriver::emergencyStop() {
     _moving = false;
 }
 
+void DCMotorDriver::runForward() {
+    _targetSpeed = _maxSpeedLimit;
+    _moving = true;
+    _moveDuration = 0;  // Run indefinitely
+    
+    // If no acceleration, apply immediately
+    if (_accelerationRate <= 0) {
+        _currentSpeed = _targetSpeed;
+        applySpeed(_currentSpeed);
+    }
+    
+    _lastUpdateTime = millis();
+    Serial.println("DC Motor: Running forward");
+}
+
+void DCMotorDriver::runBackward() {
+    _targetSpeed = -_maxSpeedLimit;
+    _moving = true;
+    _moveDuration = 0;  // Run indefinitely
+    
+    // If no acceleration, apply immediately
+    if (_accelerationRate <= 0) {
+        _currentSpeed = _targetSpeed;
+        applySpeed(_currentSpeed);
+    }
+    
+    _lastUpdateTime = millis();
+    Serial.println("DC Motor: Running backward");
+}
+
 void DCMotorDriver::coast() {
     // Both pins LOW - motor free-wheels
     ledcWrite(_pwmChannel1, 0);
     ledcWrite(_pwmChannel2, 0);
     _currentSpeed = 0;
     _targetSpeed = 0;
+    _moving = false;
+    Serial.println("DC Motor: Coast (IN1=0, IN2=0) - freewheeling");
 }
 
 void DCMotorDriver::brake() {
-    // Both pins HIGH - motor brakes
+    // Both pins HIGH - motor brakes (shorted)
     ledcWrite(_pwmChannel1, _maxDuty);
     ledcWrite(_pwmChannel2, _maxDuty);
     _currentSpeed = 0;
     _targetSpeed = 0;
+    _moving = false;
+    Serial.printf("DC Motor: Brake (IN1=%d, IN2=%d) - motor locked\n", _maxDuty, _maxDuty);
 }
 
 bool DCMotorDriver::isMoving() const {
@@ -199,8 +239,6 @@ bool DCMotorDriver::isMoving() const {
 }
 
 void DCMotorDriver::update() {
-    if (!_enabled) return;
-    
     uint32_t now = millis();
     
     // Handle timed moves
@@ -349,11 +387,11 @@ MotorStatus DCMotorDriver::getStatus() {
     status.stalling = false;
     
     status.position = _virtualPosition;
-    status.targetPosition = (int32_t)(_targetSpeed * 1000);  // Speed as "position"
+    status.targetPosition = (int32_t)(_targetSpeed * 100);  // Speed as percentage
     
     status.currentMA = 0;  // Unknown
     status.loadValue = 0;  // No load sensing
-    status.currentSpeed = _currentSpeed * 1000;  // Scale for display
+    status.currentSpeed = _currentSpeed * 100;  // Speed as percentage
     
     status.errorFlags = MotorError::NONE;
     
@@ -398,4 +436,41 @@ void DCMotorDriver::printDiagnostics() {
     }
     
     Serial.println("\n═══════════════════════════════════════════════════════════════\n");
+}
+
+// =============================================================================
+// QUERY METHODS
+// =============================================================================
+
+int32_t DCMotorDriver::getTargetPosition() const {
+    // For DC motor: return target speed as percentage (-100 to +100)
+    return (int32_t)(_targetSpeed * 100);
+}
+
+int32_t DCMotorDriver::getActualSpeed() const {
+    // Return current speed as percentage (-100 to +100)
+    return (int32_t)(_currentSpeed * 100);
+}
+
+uint8_t DCMotorDriver::getRampState() const {
+    // Ramp state codes from FastAccelStepper:
+    // IDLE=0, COAST=1, ACCELERATE=2, DECELERATE=4
+    if (!_enabled || (!_moving && _currentSpeed == 0)) {
+        return 0;  // IDLE
+    }
+    
+    if (_currentSpeed == _targetSpeed) {
+        return 1;  // COAST (constant speed)
+    }
+    
+    if (abs(_currentSpeed) < abs(_targetSpeed)) {
+        return 2;  // ACCELERATE
+    }
+    
+    return 4;  // DECELERATE
+}
+
+bool DCMotorDriver::isRunningContinuously() const {
+    // Running continuously if moving with no set duration
+    return _moving && _moveDuration == 0;
 }
