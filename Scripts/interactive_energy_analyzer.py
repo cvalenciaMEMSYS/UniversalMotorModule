@@ -85,7 +85,7 @@ def parse_test_id(filename: str) -> Optional[Dict]:
     """
     # Speed code to value mapping
     speed_map = {
-        'VL': 100, 'L': 500, 'M': 2000, 'H': 5000, 'VH': 10000
+        'VL': 100, 'L': 500, 'M': 2000, 'H': 5000, 'VH': 10000, 'UH': 20000
     }
     
     basename = os.path.basename(filename)
@@ -117,11 +117,11 @@ def parse_test_id(filename: str) -> Optional[Dict]:
     # Examples: M1-CVH-6, M2-CL-4-R, M1-TVH-4, M1-CVH-R-4 (reverse before voltage)
     
     # Try pattern 1: M1-CVH-6 or M1-CVH-6-R (direction suffix)
-    match = re.match(r'^(M\d+)-([CT]?)([VLH]+|M)-(\d+)(-R)?', basename)
+    match = re.match(r'^(M\d+)-([CT]?)([VLHU]+|M)-(\d+)(-R)?', basename)
     
     # Try pattern 2: M1-CVH-R-4 (direction before voltage)
     if not match:
-        match2 = re.match(r'^(M\d+)-([CT]?)([VLH]+|M)-R-(\d+)', basename)
+        match2 = re.match(r'^(M\d+)-([CT]?)([VLHU]+|M)-R-(\d+)', basename)
         if match2:
             motor = match2.group(1)
             profile_prefix = match2.group(2) or 'C'
