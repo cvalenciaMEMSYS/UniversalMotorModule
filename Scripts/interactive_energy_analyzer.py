@@ -1502,133 +1502,318 @@ class EnergyAnalyzer:
         return best
     
     def _generate_plots(self):
-        """Generate comparison plots for best configurations."""
+        """Generate comparison plots for best configurations.
+
+        Shows a selection dialog so the user can pick which dataset to plot
+        and customize the output filename.  Defaults to the best-efficiency
+        configuration when available.
+        """
         if not self.results:
             messagebox.showwarning("Warning", "No results to plot. Process some tests first.")
             return
-        
+
+        # --- Determine default dataset (best efficiency) ---
         best_configs = self._find_best_configurations()
-        best_efficiency = best_configs.get('Best Efficiency')
-        
-        if not best_efficiency:
-            messagebox.showwarning("Warning", "No best efficiency configuration found.")
+        default_result = best_configs.get('Best Efficiency')
+        default_save_name = f"{self.motor_id}_best_config"
+
+        # --- Show dataset picker dialog ---
+        selected = self._show_plot_selection_dialog(default_result, default_save_name)
+        if selected is None:
+            return  # User cancelled
+
+        chosen_result, save_name = selected
+
+        # --- Resolve data files for the chosen dataset ---
+        chosen_test = self._resolve_test_data(chosen_result)
+        if chosen_test is None:
             return
-        
-        # Find the test file for the best efficiency config
-        best_test = None
-        for test in self.test_queue:
-            if test['test_info']['test_id'] == best_efficiency['test_id']:
-                best_test = test
-                break
-        
-        if not best_test or not best_test['jls_file']:
-            # No data file loaded - ask user for data folder
-            response = messagebox.askyesno(
-                "Data Files Needed",
-                "No data files loaded for the best configuration.\n\n"
-                "Would you like to select the motor data folder\n"
-                f"to generate the plot for {best_efficiency['test_id']}?"
-            )
-            if not response:
-                return
-            
-            folder = filedialog.askdirectory(title="Select Motor Data Folder (with JLS/CSV files)")
-            if not folder:
-                return
-            
-            # Discover test files and match
-            test_files = discover_test_files(folder)
-            for test in test_files:
-                if test['test_info']['test_id'] == best_efficiency['test_id']:
-                    best_test = test
-                    # Also update the queue entry
-                    for i, q_test in enumerate(self.test_queue):
-                        if q_test['test_info']['test_id'] == best_efficiency['test_id']:
-                            self.test_queue[i] = test
-                            break
+
+        # --- Render and save ---
+        self._render_config_plot(chosen_result, chosen_test, save_name)
+
+    # -----------------------------------------------------------------
+    # Plot helpers
+    # -----------------------------------------------------------------
+
+    def _show_plot_selection_dialog(
+        self,
+        default_result: Optional[Dict],
+        default_save_name: str,
+    ) -> Optional[Tuple[Dict, str]]:
+        """Show a dialog letting the user pick dataset and output name.
+
+        Args:
+            default_result: Pre-selected result dict (best efficiency), or None.
+            default_save_name: Default filename stem for the saved plot.
+
+        Returns:
+            Tuple of (chosen_result, save_name) or None if cancelled.
+        """
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Select Dataset to Plot")
+        dlg.geometry("420x340")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        result_holder: List[Optional[Tuple[Dict, str]]] = [None]
+
+        # --- Dataset dropdown ---
+        ttk.Label(dlg, text="Dataset:", font=("", 10, "bold")).pack(anchor="w", padx=12, pady=(12, 2))
+
+        # Build mapping: display label -> result dict
+        options_map: Dict[str, Dict] = {}
+        for r in self.results:
+            label = r['test_id']
+            # Append key metrics for clarity
+            extras = f"  ({r['energy_mj']:.1f} mJ"
+            if r.get('max_thrust_n'):
+                extras += f", {r['max_thrust_n']:.2f} N"
+            extras += ")"
+            options_map[label + extras] = r
+
+        option_labels = list(options_map.keys())
+
+        # Determine which option to pre-select
+        default_idx = 0
+        if default_result:
+            for i, (lbl, res) in enumerate(options_map.items()):
+                if res['test_id'] == default_result['test_id']:
+                    default_idx = i
                     break
-            
-            if not best_test or not best_test['jls_file']:
-                messagebox.showwarning("Warning", f"Could not find data file for {best_efficiency['test_id']} in selected folder.")
+
+        combo_var = tk.StringVar(value=option_labels[default_idx] if option_labels else "")
+        combo = ttk.Combobox(dlg, textvariable=combo_var, values=option_labels,
+                             state="readonly", width=50)
+        combo.pack(padx=12, pady=2, fill="x")
+
+        # --- Preview of selected dataset ---
+        preview_text = tk.Text(dlg, height=6, width=50, font=("Courier", 9), state="disabled")
+        preview_text.pack(padx=12, pady=(6, 2), fill="x")
+
+        def _update_preview(*_args):
+            sel_label = combo_var.get()
+            res = options_map.get(sel_label)
+            if res is None:
                 return
-        
+            lines = [
+                f"Test ID:    {res['test_id']}",
+                f"Profile:    {res['profile']}  |  Direction: {res['direction']}",
+                f"Voltage:    {res['voltage']} V  |  Speed: {res['speed_code']}",
+                f"Energy:     {res['energy_mj']:.1f} mJ",
+                f"Mean Power: {res['mean_power_mw']:.1f} mW",
+            ]
+            if res.get('max_thrust_n'):
+                lines.append(f"Max Thrust: {res['max_thrust_n']:.2f} N")
+            preview_text.config(state="normal")
+            preview_text.delete("1.0", tk.END)
+            preview_text.insert("1.0", "\n".join(lines))
+            preview_text.config(state="disabled")
+
+        combo.bind("<<ComboboxSelected>>", _update_preview)
+        _update_preview()  # initial fill
+
+        # --- Save name entry ---
+        ttk.Label(dlg, text="Save filename (without extension):",
+                  font=("", 10, "bold")).pack(anchor="w", padx=12, pady=(10, 2))
+        name_var = tk.StringVar(value=default_save_name)
+        name_entry = ttk.Entry(dlg, textvariable=name_var, width=50)
+        name_entry.pack(padx=12, pady=2, fill="x")
+
+        # Auto-update save name when dataset changes
+        def _sync_name(*_args):
+            sel_label = combo_var.get()
+            res = options_map.get(sel_label)
+            if res:
+                name_var.set(f"{self.motor_id}_{res['test_id']}")
+
+        combo.bind("<<ComboboxSelected>>", lambda e: (_update_preview(e), _sync_name(e)))
+
+        # --- Buttons ---
+        btn_frame = ttk.Frame(dlg)
+        btn_frame.pack(pady=12)
+
+        def _on_ok():
+            sel_label = combo_var.get()
+            res = options_map.get(sel_label)
+            if res is None:
+                messagebox.showwarning("Warning", "No dataset selected.", parent=dlg)
+                return
+            result_holder[0] = (res, name_var.get().strip() or default_save_name)
+            dlg.destroy()
+
+        def _on_cancel():
+            dlg.destroy()
+
+        ttk.Button(btn_frame, text="Generate Plot", command=_on_ok, width=16).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="Cancel", command=_on_cancel, width=10).pack(side="left", padx=6)
+
+        dlg.wait_window()
+        return result_holder[0]
+
+    def _resolve_test_data(self, chosen_result: Dict) -> Optional[Dict]:
+        """Find or ask the user for data files matching *chosen_result*.
+
+        Args:
+            chosen_result: The result dict whose data files we need.
+
+        Returns:
+            The matching test-queue entry with file paths, or None on failure.
+        """
+        chosen_test = None
+        for test in self.test_queue:
+            if test['test_info']['test_id'] == chosen_result['test_id']:
+                chosen_test = test
+                break
+
+        if chosen_test and chosen_test.get('jls_file'):
+            return chosen_test
+
+        # No data file loaded — ask user for data folder
+        response = messagebox.askyesno(
+            "Data Files Needed",
+            f"No data files loaded for {chosen_result['test_id']}.\n\n"
+            "Would you like to select the motor data folder?"
+        )
+        if not response:
+            return None
+
+        folder = filedialog.askdirectory(title="Select Motor Data Folder (with JLS/CSV files)")
+        if not folder:
+            return None
+
+        test_files = discover_test_files(folder)
+        for test in test_files:
+            if test['test_info']['test_id'] == chosen_result['test_id']:
+                chosen_test = test
+                # Update queue entry too
+                for i, q_test in enumerate(self.test_queue):
+                    if q_test['test_info']['test_id'] == chosen_result['test_id']:
+                        self.test_queue[i] = test
+                        break
+                break
+
+        if not chosen_test or not chosen_test.get('jls_file'):
+            messagebox.showwarning(
+                "Warning",
+                f"Could not find data file for {chosen_result['test_id']} in selected folder."
+            )
+            return None
+
+        return chosen_test
+
+    def _render_config_plot(self, result: Dict, test: Dict, save_name: str) -> None:
+        """Create, display, and save a power/current/force plot for *result*.
+
+        Args:
+            result: The metrics dict for the dataset.
+            test: The test-queue entry with file paths.
+            save_name: Filename stem (no extension) for the saved image.
+        """
         # Load the data
-        power_df = self._read_jls_file(best_test['jls_file'])
+        power_df = self._read_jls_file(test['jls_file'])
         force_df = None
-        if best_test['csv_file']:
-            force_df = self._read_force_csv(best_test['csv_file'])
-        
+        if test['csv_file']:
+            force_df = self._read_force_csv(test['csv_file'])
+
         # Get saved offsets and selection region
-        start = best_efficiency.get('selection_start')
-        end = best_efficiency.get('selection_end')
-        saved_offset = best_efficiency.get('force_time_offset', 0.0)
-        
+        start = result.get('selection_start')
+        end = result.get('selection_end')
+        saved_offset = result.get('force_time_offset', 0.0)
+
         # Apply saved time offset to force data
         if force_df is not None and saved_offset != 0.0:
             force_df['time'] = force_df['time'] + saved_offset
-        
-        # Create the plot
-        fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-        
+
+        # Create the plot — 3 subplots: power, current, force
+        fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+
+        # --- Selection region helper ---
+        def _draw_region(ax):
+            if start is not None and end is not None:
+                ax.axvspan(start, end, alpha=0.2, color='yellow')
+                ax.axvline(start, color='green', linestyle='--', alpha=0.7)
+                ax.axvline(end, color='red', linestyle='--', alpha=0.7)
+
+        # Compute RMS current in the selected region (if data available)
+        rms_current_ma = None
+        peak_current_ma = result.get('peak_current_ma')
+        if (power_df is not None and 'current' in power_df.columns
+                and start is not None and end is not None):
+            mask = (power_df['time'] >= start) & (power_df['time'] <= end)
+            sel_current: np.ndarray = power_df.loc[mask, 'current'].values  # type: ignore[union-attr]
+            if len(sel_current) > 0:
+                rms_current_ma = float(np.sqrt(np.mean(sel_current ** 2))) * 1000
+                peak_current_ma = float(np.max(sel_current)) * 1000
+
         # Power plot
         if power_df is not None:
-            axes[0].plot(power_df['time'], power_df['power'] * 1000, 'b-', linewidth=0.5, label='Power')
+            axes[0].plot(power_df['time'], power_df['power'] * 1000,
+                         'b-', linewidth=0.5, label='Power')
             axes[0].set_ylabel('Power (mW)')
-            axes[0].set_title(f"{self.motor_id} — Best Efficiency Configuration: {best_efficiency['test_id']}")
+            axes[0].set_title(f"{self.motor_id} — {result['test_id']}")
             axes[0].grid(True, alpha=0.3)
             axes[0].legend()
-            
-            # Add selection region
-            if start is not None and end is not None:
-                axes[0].axvspan(start, end, alpha=0.2, color='yellow', label='Analysis Region')
-                axes[0].axvline(start, color='green', linestyle='--', alpha=0.7)
-                axes[0].axvline(end, color='red', linestyle='--', alpha=0.7)
-        
-        # Force plot
-        if force_df is not None:
-            axes[1].plot(force_df['time'], force_df['force'], 'g-', linewidth=1, 
-                        marker='.', markersize=3, label='Force')
-            axes[1].set_ylabel('Force (N)')
-            axes[1].set_xlabel('Time (s)')
-            axes[1].set_title('Force Measurement')
+            _draw_region(axes[0])
+
+        # Current plot
+        if power_df is not None and 'current' in power_df.columns:
+            axes[1].plot(power_df['time'], power_df['current'] * 1000,
+                         'r-', linewidth=0.5, label='Current')
+            axes[1].set_ylabel('Current (mA)')
+            axes[1].set_title('Current Draw')
             axes[1].grid(True, alpha=0.3)
             axes[1].legend()
-            
-            # Add selection region
-            if start is not None and end is not None:
-                axes[1].axvspan(start, end, alpha=0.2, color='yellow')
-                axes[1].axvline(start, color='green', linestyle='--', alpha=0.7)
-                axes[1].axvline(end, color='red', linestyle='--', alpha=0.7)
+            _draw_region(axes[1])
         else:
-            axes[1].text(0.5, 0.5, 'No force data available', 
-                        ha='center', va='center', transform=axes[1].transAxes)
-        
-        # Add metrics annotation
-        metrics_text = (
-            f"Energy: {best_efficiency['energy_mj']:.1f} mJ\n"
-            f"Mean Power: {best_efficiency['mean_power_mw']:.1f} mW\n"
-            f"Peak Power: {best_efficiency['peak_power_mw']:.1f} mW\n"
-            f"Max Thrust: {best_efficiency['max_thrust_n']:.2f} N\n"
-            f"Efficiency: {best_efficiency['energy_mj']/best_efficiency['max_thrust_n']:.1f} mJ/N"
-        ) if best_efficiency['max_thrust_n'] else (
-            f"Energy: {best_efficiency['energy_mj']:.1f} mJ\n"
-            f"Mean Power: {best_efficiency['mean_power_mw']:.1f} mW\n"
-            f"Peak Power: {best_efficiency['peak_power_mw']:.1f} mW"
-        )
-        
+            axes[1].text(0.5, 0.5, 'No current data available',
+                         ha='center', va='center', transform=axes[1].transAxes)
+
+        # Force plot
+        if force_df is not None:
+            axes[2].plot(force_df['time'], force_df['force'], 'g-', linewidth=1,
+                         marker='.', markersize=3, label='Force')
+            axes[2].set_ylabel('Force (N)')
+            axes[2].set_xlabel('Time (s)')
+            axes[2].set_title('Force Measurement')
+            axes[2].grid(True, alpha=0.3)
+            axes[2].legend()
+            _draw_region(axes[2])
+        else:
+            axes[2].text(0.5, 0.5, 'No force data available',
+                         ha='center', va='center', transform=axes[2].transAxes)
+
+        # --- Metrics annotation ---
+        lines = [
+            f"Energy:      {result['energy_mj']:.1f} mJ",
+            f"Mean Power:  {result['mean_power_mw']:.1f} mW",
+            f"Peak Power:  {result['peak_power_mw']:.1f} mW",
+        ]
+        if peak_current_ma is not None:
+            lines.append(f"Peak Current:{peak_current_ma:.0f} mA")
+        if rms_current_ma is not None:
+            lines.append(f"RMS Current: {rms_current_ma:.0f} mA")
+        if result.get('max_thrust_n'):
+            lines.append(f"Max Thrust:  {result['max_thrust_n']:.2f} N")
+            lines.append(
+                f"Efficiency:  {result['energy_mj']/result['max_thrust_n']:.1f} mJ/N")
+
+        metrics_text = "\n".join(lines)
+
         axes[0].text(0.02, 0.98, metrics_text, transform=axes[0].transAxes,
-                    fontsize=9, verticalalignment='top', fontfamily='monospace',
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        
+                     fontsize=9, verticalalignment='top', fontfamily='monospace',
+                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
         plt.tight_layout()
-        
+
         # Save plot
-        plot_path = os.path.join(self.output_dir, f"{self.motor_id}_best_config.png")
+        plot_path = os.path.join(self.output_dir, f"{save_name}.png")
         plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close(fig)
-        
+
         print(f"Saved plot: {plot_path}")
-        messagebox.showinfo("Plot Generated", f"Best configuration plot saved to:\n\n{plot_path}")
+        messagebox.showinfo("Plot Generated", f"Plot saved to:\n\n{plot_path}")
     
     def run(self):
         """Start the application."""
