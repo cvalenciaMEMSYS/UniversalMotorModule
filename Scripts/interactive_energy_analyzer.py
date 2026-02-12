@@ -76,10 +76,15 @@ def parse_test_id(filename: str) -> Optional[Dict]:
     Parse a test filename to extract motor, speed, voltage, and direction info.
     
     Patterns:
+        Stepper motors (M prefix):
         M1-CVH-6-20260119_150831.jls -> Motor 1, Constant Very High, 6V, Normal
         M2-CL-4-R-20260119_162132.jls -> Motor 2, Constant Low, 4V, Reverse
         M1-TVH-4-20260119_120553.jls -> Motor 1, Trapezoidal Very High, 4V, Normal
         M2-BD-OFF-R_0.0V_20260119_163609.csv -> Motor 2, Backdrive Off, Reverse
+        
+        DC motors (D prefix):
+        D1-DC-3-20260212_141500.jls -> DC Motor 1, 100% PWM, 3V, Normal
+        D2-DC-5-R-20260212_150000.jls -> DC Motor 2, 100% PWM, 5V, Reverse
     
     Returns dict with: motor, profile, speed_code, speed_value, voltage, direction, test_id
     """
@@ -89,6 +94,24 @@ def parse_test_id(filename: str) -> Optional[Dict]:
     }
     
     basename = os.path.basename(filename)
+    
+    # DC motor pattern: D[n]-DC-[Voltage](-R)
+    # Examples: D1-DC-3, D2-DC-5-R, D3-DC-4
+    match_dc = re.match(r'^(D\d+)-DC-(\d+)(-R)?', basename)
+    if match_dc:
+        motor = match_dc.group(1)
+        voltage = int(match_dc.group(2))
+        direction = 'R' if match_dc.group(3) else 'N'
+        dir_suffix = '-R' if direction == 'R' else ''
+        return {
+            'motor': motor,
+            'profile': 'DC',
+            'speed_code': 'MAX',
+            'speed_value': 100,   # 100% duty cycle
+            'voltage': voltage,
+            'direction': direction,
+            'test_id': f"{motor}-DC-{voltage}{dir_suffix}"
+        }
     
     # Handle backdrive files specially
     if 'BD-OFF' in basename:
