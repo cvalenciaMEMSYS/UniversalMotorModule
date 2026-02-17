@@ -1,0 +1,2 @@
+test_id,motor,profile,speed_code,speed_value,voltage,direction,selection_start,selection_end,force_time_offset,duration_ms,mean_power_mw,peak_power_mw,mean_current_ma,peak_current_ma,energy_mj,max_thrust_n,mean_thrust_n
+D2-DC-6,D2,DC,MAX,100,6,N,1.3817778143591761,23.512216456129195,0.0,22130.43864177002,185.63622,657.85974,31.026598,110.54086,4108.211211642526,,

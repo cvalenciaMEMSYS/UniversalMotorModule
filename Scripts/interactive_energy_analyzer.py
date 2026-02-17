@@ -571,16 +571,11 @@ class EnergyAnalyzer:
         base_name = os.path.basename(js_path)
         dir_path = os.path.dirname(js_path)
         
-        # Extract test ID from filename
-        # Handles patterns like:
-        #   M2-CVH-6-20260119_150831.jls -> test_id = "M2-CVH-6"
-        #   M2-CL-4_4.0V_20260119_143723.jls -> test_id = "M2-CL-4"
-        import re
-        # Match motor ID pattern: M[number]-[letters]-[number]
-        match = re.match(r'^(M\d+-[A-Za-z]+-\d+)', base_name)
-        test_id = match.group(1) if match else base_name.split('_')[0]
+        # Extract test ID using the shared parser
+        test_info = parse_test_id(base_name)
+        test_id = test_info['test_id'] if test_info else base_name.split('_')[0]
         
-        if match:
+        if test_info:
             # Look for matching force CSV with this test ID
             # Exclude files with -R suffix (reverse direction)
             potential_force_files = glob.glob(os.path.join(dir_path, f"{test_id}*.csv"))
@@ -1449,14 +1444,29 @@ class EnergyAnalyzer:
             
             # Active test matrix (excludes backdrive)
             f.write("## Complete Test Matrix\n\n")
-            f.write("| Test ID | Speed | Voltage | Dir | Mean Power (mW) | Peak Power (mW) | Peak I (mA) | Energy (mJ) | Duration (ms) | Max Thrust (N) |\n")
-            f.write("|---------|-------|---------|-----|-----------------|-----------------|-------------|-------------|---------------|----------------|\n")
+            f.write("| Test ID | Type | Speed | Voltage | Dir "
+                    "| Mean Power (mW) | Peak Power (mW) | Peak I (mA) "
+                    "| Energy (mJ) | Duration (ms) | Max Thrust (N) |\n")
+            f.write("|---------|------|-------|---------|-----"
+                    "|-----------------|-----------------|-----------"
+                    "--|-------------|---------------|----------------|\n")
             
             for r in active_tests:
-                thrust_str = f"{r['max_thrust_n']:.2f}" if r['max_thrust_n'] is not None else "N/A"
-                f.write(f"| {r['test_id']} | {r['speed_value']} | {r['voltage']}V | {r['direction']} | "
-                       f"{r['mean_power_mw']:.0f} | {r['peak_power_mw']:.0f} | {r['peak_current_ma']:.0f} | "
-                       f"{r['energy_mj']:.0f} | {r['duration_ms']:.0f} | {thrust_str} |\n")
+                thrust_str = (f"{r['max_thrust_n']:.2f}"
+                              if r['max_thrust_n'] is not None else "N/A")
+                if r.get('profile') == 'DC':
+                    type_str = "DC"
+                    speed_str = "100%"
+                else:
+                    type_str = r.get('profile', '?')
+                    speed_str = str(r['speed_value'])
+                f.write(
+                    f"| {r['test_id']} | {type_str} | {speed_str} "
+                    f"| {r['voltage']}V | {r['direction']} | "
+                    f"{r['mean_power_mw']:.0f} | {r['peak_power_mw']:.0f} "
+                    f"| {r['peak_current_ma']:.0f} | "
+                    f"{r['energy_mj']:.0f} | {r['duration_ms']:.0f} "
+                    f"| {thrust_str} |\n")
             
             # Backdrive results (separate section)
             if backdrive_tests:
@@ -1470,18 +1480,35 @@ class EnergyAnalyzer:
             
             # Best configuration summary
             f.write("\n## Best Configuration Summary\n\n")
-            f.write("| Goal | Test ID | Speed | Voltage | Mean Power (mW) | Energy (mJ) | Max Thrust (N) | Efficiency (mJ/N) |\n")
-            f.write("|------|---------|-------|---------|-----------------|-------------|----------------|-------------------|\n")
+            f.write("| Goal | Test ID | Type | Speed | Voltage "
+                    "| Mean Power (mW) | Energy (mJ) | Max Thrust (N) "
+                    "| Efficiency (mJ/N) |\n")
+            f.write("|------|---------|------|-------|--------"
+                    "|-----------------|-----------"
+                    "--|----------------|-------------------|\n")
             
             best_configs = self._find_best_configurations()
             for goal, config in best_configs.items():
                 if config:
-                    eff = config['energy_mj'] / config['max_thrust_n'] if config['max_thrust_n'] else 0
-                    thrust_str = f"{config['max_thrust_n']:.2f}" if config['max_thrust_n'] else "N/A"
-                    eff_str = f"{eff:.1f}" if config['max_thrust_n'] else "N/A"
-                    f.write(f"| **{goal}** | {config['test_id']} | {config['speed_value']} | "
-                           f"{config['voltage']}V | {config['mean_power_mw']:.0f} | "
-                           f"{config['energy_mj']:.0f} | {thrust_str} | {eff_str} |\n")
+                    eff = (config['energy_mj'] / config['max_thrust_n']
+                           if config['max_thrust_n'] else 0)
+                    thrust_str = (f"{config['max_thrust_n']:.2f}"
+                                  if config['max_thrust_n'] else "N/A")
+                    eff_str = (f"{eff:.1f}"
+                               if config['max_thrust_n'] else "N/A")
+                    if config.get('profile') == 'DC':
+                        type_str = "DC"
+                        speed_str = "100%"
+                    else:
+                        type_str = config.get('profile', '?')
+                        speed_str = str(config['speed_value'])
+                    f.write(
+                        f"| **{goal}** | {config['test_id']} "
+                        f"| {type_str} | {speed_str} | "
+                        f"{config['voltage']}V | "
+                        f"{config['mean_power_mw']:.0f} | "
+                        f"{config['energy_mj']:.0f} | {thrust_str} "
+                        f"| {eff_str} |\n")
     
     def _find_best_configurations(self):
         """Find best configurations for different optimization goals.
