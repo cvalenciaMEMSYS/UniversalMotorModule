@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Force-Deflection Sweep HDF5 Schema",
+  "description": "Defines the HDF5 file structure produced by ForceDeflection_V3.py. Each file contains a multi-position FD sweep: at each motor position, one or more FD cycles are recorded. This schema documents groups, datasets, and attributes so analysis tools can be built independently.",
+  "version": "1.0",
+  "created": "2026-02-25",
+  "file_extension": ".h5",
+  "structure": {
+    "/": {
+      "type": "group",
+      "description": "HDF5 root group",
+      "children": {
+        "Metadata": {
+          "type": "group",
+          "description": "Test configuration and metadata stored as HDF5 attributes on this group.",
+          "attributes": {
+            "TestName": {
+              "dtype": "string",
+              "description": "User-provided test name"
+            },
+            "DateTimeISO": {
+              "dtype": "string",
+              "description": "ISO 8601 timestamp of test start, e.g. 2026-02-25T14:30:00"
+            },
+            "SchemaVersion": {
+              "dtype": "string",
+              "description": "Schema version string, e.g. 1.0"
+            },
+            "TestType": {
+              "dtype": "string",
+              "description": "Always 'Force-Deflection Sweep'"
+            },
+            "TotalPositions": {
+              "dtype": "int",
+              "description": "Number of motor positions in the sweep"
+            },
+            "MotorStepSize_steps": {
+              "dtype": "int",
+              "description": "Motor step size between positions in steps"
+            },
+            "MotorSpeed_steps_s": {
+              "dtype": "int",
+              "description": "Motor speed in steps per second"
+            },
+            "FD_StepSize_mm": {
+              "dtype": "float64",
+              "description": "FD actuator step size per measurement point in mm"
+            },
+            "FD_TotalDistance_mm": {
+              "dtype": "float64",
+              "description": "Total FD travel distance per segment in mm"
+            },
+            "FD_Speed_mm_s": {
+              "dtype": "float64",
+              "description": "FD actuator speed in mm/s"
+            },
+            "FD_ForceAverages": {
+              "dtype": "int",
+              "description": "Number of force readings averaged per measurement point"
+            },
+            "FD_ForceLimit_N": {
+              "dtype": "float64",
+              "description": "User-configured force abort threshold in Newtons"
+            },
+            "FD_DirectionPattern": {
+              "dtype": "string",
+              "description": "Direction pattern name: 'Push only', 'Pull only', 'Push-Pull', or 'Pull-Push'"
+            },
+            "FD_CyclesPerPosition": {
+              "dtype": "int",
+              "description": "Number of FD cycles run at each motor position"
+            }
+          }
+        },
+        "FDRuns": {
+          "type": "group",
+          "description": "Contains one sub-group per motor position (P0, P1, P2, ...).",
+          "children": {
+            "P{n}": {
+              "type": "group",
+              "description": "Data for motor position n (0-based). Group name is 'P0', 'P1', etc.",
+              "attributes": {
+                "motor_position_steps": {
+                  "dtype": "int",
+                  "description": "Cumulative motor position in steps from the starting position"
+                }
+              },
+              "datasets": {
+                "displacement_mm": {
+                  "dtype": "float64",
+                  "shape": ["N"],
+                  "description": "FD actuator displacement in mm for each measurement point. N = total points across all cycles and phases at this position."
+                },
+                "force_n": {
+                  "dtype": "float64",
+                  "shape": ["N"],
+                  "description": "Averaged force reading in Newtons for each measurement point. Same length as displacement_mm."
+                },
+                "cycle": {
+                  "dtype": "int32",
+                  "shape": ["N"],
+                  "description": "1-based cycle number for each measurement point."
+                },
+                "phase": {
+                  "dtype": "string",
+                  "shape": ["N"],
+                  "description": "Phase name for each measurement point: 'push' or 'pull'."
+                }
+              },
+              "children": {
+                "Statistics": {
+                  "type": "group",
+                  "description": "Summary statistics computed from the measurement data at this position.",
+                  "datasets": {
+                    "max_force_n": {
+                      "dtype": "float64",
+                      "shape": "scalar",
+                      "description": "Maximum force recorded at this position in N"
+                    },
+                    "min_force_n": {
+                      "dtype": "float64",
+                      "shape": "scalar",
+                      "description": "Minimum force recorded at this position in N"
+                    },
+                    "num_points": {
+                      "dtype": "int",
+                      "shape": "scalar",
+                      "description": "Total number of measurement points at this position"
+                    },
+                    "zero_crossings": {
+                      "dtype": "string",
+                      "shape": "scalar",
+                      "description": "JSON array of zero-crossing objects: [{\"position_mm\": float, \"slope_N_per_mm\": float}, ...]. Empty array '[]' if no crossings found."
+                    }
+                  }
+                },
+                "Plot": {
+                  "type": "group",
+                  "description": "Rendered plot images for this position.",
+                  "datasets": {
+                    "fd_plot": {
+                      "dtype": "uint8",
+                      "shape": ["bytes"],
+                      "description": "PNG image of the force-displacement plot for this position, stored as raw bytes."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "Summary": {
+          "type": "group",
+          "description": "Overall sweep summary data.",
+          "datasets": {
+            "overview_plot": {
+              "dtype": "uint8",
+              "shape": ["bytes"],
+              "description": "PNG image of all positions overlaid on a single force-displacement plot."
+            }
+          }
+        }
+      }
+    }
+  }
+}

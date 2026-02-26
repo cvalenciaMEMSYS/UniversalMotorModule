@@ -228,7 +228,7 @@ bool TMC2209Driver::isEnabled() const {
 // =============================================================================
 
 void TMC2209Driver::move(int32_t steps) {
-    if (!_enabled) return;
+    if (!_enabled) enable();  // Auto-enable on first move
     if (steps == 0) return;
     
     // FastAccelStepper handles all motion planning
@@ -238,7 +238,7 @@ void TMC2209Driver::move(int32_t steps) {
 }
 
 void TMC2209Driver::moveTo(int32_t position) {
-    if (!_enabled) return;
+    if (!_enabled) enable();  // Auto-enable on first move
     if (position < 0) position = 0;  // Only positive positions
     
     // FastAccelStepper handles all motion planning
