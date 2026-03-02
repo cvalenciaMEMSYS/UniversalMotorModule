@@ -1,5 +1,5 @@
 """
-Force-Deflection V3 — Automated Multi-Position FD Sweep
+ForceDeflection_MotorAndForces — Automated Multi-Position FD Sweep
 
 Coordinates a force-deflection setup (via RPi TCP server) with a UMM stepper
 motor (via direct serial) to run FD cycles at multiple motor positions.
@@ -12,7 +12,7 @@ Prerequisites:
        python fd_server_nojs.py --serial /dev/ttyACM0
 
 Usage:
-    python ForceDeflection_V3.py
+    python ForceDeflection_MotorAndForces.py
 """
 
 import json
@@ -362,11 +362,11 @@ def _determine_phase_name(
 
 
 class ForceDeflectionSweepWindow(QMainWindow):
-    """Main window for Force-Deflection V3 multi-position sweep tool."""
+    """Main window for ForceDeflection_MotorAndForces multi-position sweep tool."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Force-Deflection V3 — Automated Multi-Position Sweep")
+        self.setWindowTitle("ForceDeflection MotorAndForces — Automated Multi-Position Sweep")
         self.resize(1300, 850)
 
         # -- FD state --
@@ -657,25 +657,39 @@ class ForceDeflectionSweepWindow(QMainWindow):
         self._zero_btn.clicked.connect(self._zero_loadcell)
         layout.addWidget(self._zero_btn)
 
-        fd_row = QHBoxLayout()
-        fd_row.addWidget(QLabel("Jog FD:"))
-        self._fd_fwd_btn = QPushButton("\u25B2 Forward")
-        self._fd_fwd_btn.clicked.connect(self._jog_fd_forward)
-        fd_row.addWidget(self._fd_fwd_btn)
-        self._fd_bwd_btn = QPushButton("\u25BC Backward")
-        self._fd_bwd_btn.clicked.connect(self._jog_fd_backward)
-        fd_row.addWidget(self._fd_bwd_btn)
-        layout.addLayout(fd_row)
+        jog_grid = QGridLayout()
 
-        motor_row = QHBoxLayout()
-        motor_row.addWidget(QLabel("Jog Motor:"))
+        fd_label = QLabel("FD")
+        fd_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fd_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        jog_grid.addWidget(fd_label, 0, 0)
+
+        motor_label = QLabel("Motor")
+        motor_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        jog_grid.addWidget(motor_label, 0, 1)
+
+        self._fd_fwd_btn = QPushButton("\u25B2 Forward")
+        self._fd_fwd_btn.setMinimumHeight(50)
+        self._fd_fwd_btn.clicked.connect(self._jog_fd_forward)
+        jog_grid.addWidget(self._fd_fwd_btn, 1, 0)
+
         self._motor_fwd_btn = QPushButton("\u25B2 Forward")
+        self._motor_fwd_btn.setMinimumHeight(50)
         self._motor_fwd_btn.clicked.connect(self._jog_motor_forward)
-        motor_row.addWidget(self._motor_fwd_btn)
+        jog_grid.addWidget(self._motor_fwd_btn, 1, 1)
+
+        self._fd_bwd_btn = QPushButton("\u25BC Backward")
+        self._fd_bwd_btn.setMinimumHeight(50)
+        self._fd_bwd_btn.clicked.connect(self._jog_fd_backward)
+        jog_grid.addWidget(self._fd_bwd_btn, 2, 0)
+
         self._motor_bwd_btn = QPushButton("\u25BC Backward")
+        self._motor_bwd_btn.setMinimumHeight(50)
         self._motor_bwd_btn.clicked.connect(self._jog_motor_backward)
-        motor_row.addWidget(self._motor_bwd_btn)
-        layout.addLayout(motor_row)
+        jog_grid.addWidget(self._motor_bwd_btn, 2, 1)
+
+        layout.addLayout(jog_grid)
 
         self._force_label = QLabel("Force: -- N")
         self._force_label.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
@@ -2044,7 +2058,7 @@ class ForceDeflectionSweepWindow(QMainWindow):
 
 
 def main() -> None:
-    """Launch the Force-Deflection V3 application."""
+    """Launch the ForceDeflection_MotorAndForces application."""
     app = QApplication(sys.argv)
     window = ForceDeflectionSweepWindow()
     window.show()

@@ -362,11 +362,6 @@ void processCommand(String cmd) {
         Serial.println(distance, 2);
         moveStepper(distance, stepDelayUs);
         Serial.println("OK_JOG");
-        
-        // Also show force after jog
-        float force = readForce(1);
-        Serial.print("FORCE|");
-        Serial.println(force, 5);
         return;
     }
     

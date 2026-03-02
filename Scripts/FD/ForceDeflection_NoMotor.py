@@ -1,33 +1,38 @@
 """
-Force-Deflection V2 — Quasi-Static Measurement Tool
+ForceDeflection_NoMotor — Single-Position Quasi-Static Measurement Tool
 
 Performs step-measure-step force-displacement measurements on buckled beams
 and similar structures. Supports push, pull, push-pull, and pull-push patterns
-with multiple cycles for hysteresis characterization.
+with multiple cycles for hysteresis characterization. No motor required.
 
 Prerequisites:
     1. Install dependencies:
-       pip install PyQt6 pyqtgraph numpy pyserial
+       pip install PyQt6 pyqtgraph numpy h5py
 
     2. On the Raspberry Pi connected to the FD Arduino, start the server:
        python fd_server_nojs.py --serial /dev/ttyACM0
 
 Usage:
-    python ForceDeflection_V2.py
+    python ForceDeflection_NoMotor.py
 """
 
+import json
+import os
 import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
+import h5py
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtCore import QBuffer, QIODevice, Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -36,15 +41,16 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    QLineEdit,
 )
 
 from fd_client_nojs import FDClientNoJS
@@ -139,11 +145,11 @@ def _light_color(cycle_idx: int, blend: float = 0.40) -> QColor:
 
 
 class ForceDeflectionWindow(QMainWindow):
-    """Main window for Force-Deflection V2 quasi-static measurement tool."""
+    """Main window for ForceDeflection_NoMotor quasi-static measurement tool."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Force-Deflection V2 — Quasi-Static Measurement")
+        self.setWindowTitle("ForceDeflection NoMotor — Single-Position Measurement")
         self.resize(1200, 800)
 
         # State
@@ -158,6 +164,8 @@ class ForceDeflectionWindow(QMainWindow):
         self._curve_ydata: Dict[Tuple[int, int], List[float]] = {}
         self._test_thread: Optional[threading.Thread] = None
         self._polling_in_progress: bool = False
+        self._h5file: Optional[h5py.File] = None
+        self._h5path: str = ""
 
         # Signal bridge
         self._signals = SignalBridge()
@@ -197,11 +205,19 @@ class ForceDeflectionWindow(QMainWindow):
         left_layout.addWidget(self._build_connection_group())
         left_layout.addWidget(self._build_params_group())
         left_layout.addWidget(self._build_cycle_group())
+        left_layout.addWidget(self._build_save_config_group())
         left_layout.addWidget(self._build_manual_group())
         left_layout.addWidget(self._build_test_controls_group())
         left_layout.addStretch()
 
-        splitter.addWidget(left_widget)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(left_widget)
+        scroll_area.setMaximumWidth(420)
+        scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        splitter.addWidget(scroll_area)
 
         # --- Right panel (plots + analysis + log) ---
         right_widget = QWidget()
@@ -316,6 +332,38 @@ class ForceDeflectionWindow(QMainWindow):
 
         return group
 
+    # -- Save configuration --
+
+    def _build_save_config_group(self) -> QGroupBox:
+        """Build the save configuration group box."""
+        group = QGroupBox("Save Config")
+        layout = QFormLayout(group)
+
+        self._save_check = QCheckBox("Save data")
+        self._save_check.setChecked(True)
+        layout.addRow(self._save_check)
+
+        path_row = QHBoxLayout()
+        self._save_path_edit = QLineEdit()
+        self._save_path_edit.setReadOnly(True)
+        self._save_path_edit.setPlaceholderText("Select save folder...")
+        path_row.addWidget(self._save_path_edit)
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._browse_save_folder)
+        path_row.addWidget(browse_btn)
+        layout.addRow("Save Folder:", path_row)
+
+        self._test_name_edit = QLineEdit("FD Test")
+        layout.addRow("Test Name:", self._test_name_edit)
+
+        return group
+
+    def _browse_save_folder(self) -> None:
+        """Open a folder dialog to select the HDF5 save directory."""
+        folder = QFileDialog.getExistingDirectory(self, "Select Save Folder", "")
+        if folder:
+            self._save_path_edit.setText(folder)
+
     # -- Manual controls --
 
     def _build_manual_group(self) -> QGroupBox:
@@ -328,13 +376,20 @@ class ForceDeflectionWindow(QMainWindow):
         self._zero_btn.clicked.connect(self._zero_loadcell)
         layout.addWidget(self._zero_btn)
 
+        fd_label = QLabel("FD")
+        fd_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fd_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        layout.addWidget(fd_label)
+
         self._fwd_btn = QPushButton("▲ Forward")
         self._fwd_btn.setEnabled(False)
+        self._fwd_btn.setMinimumHeight(50)
         self._fwd_btn.clicked.connect(self._jog_forward)
         layout.addWidget(self._fwd_btn)
 
         self._bwd_btn = QPushButton("▼ Backward")
         self._bwd_btn.setEnabled(False)
+        self._bwd_btn.setMinimumHeight(50)
         self._bwd_btn.clicked.connect(self._jog_backward)
         layout.addWidget(self._bwd_btn)
 
@@ -582,6 +637,29 @@ class ForceDeflectionWindow(QMainWindow):
         self._experiment_data.clear()
         self._clear_curves()
 
+        # Handle save
+        test_name = self._test_name_edit.text().strip() or "FD Test"
+        save_enabled = self._save_check.isChecked()
+        save_folder = self._save_path_edit.text().strip()
+        if save_enabled and not save_folder:
+            self._log("Save enabled but no folder selected.", "error")
+            self._test_running = False
+            self._set_controls_enabled(True)
+            self._start_btn.setEnabled(True)
+            self._abort_btn.setEnabled(False)
+            return
+
+        if save_enabled:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{test_name}_{total_distance}mm_{step_size}mm_{timestamp}.h5"
+            save_path = os.path.join(save_folder, filename)
+            self._h5path = save_path
+            self._open_h5_file(
+                save_path, test_name, step_size, total_distance, speed,
+                num_averages, force_limit, pattern_name, num_cycles,
+            )
+            self._log(f"Save file: {save_path}")
+
         # Set speed on server
         self._client.set_speed(speed)
 
@@ -741,6 +819,201 @@ class ForceDeflectionWindow(QMainWindow):
         self._log("Abort requested...", "warn")
 
     # =========================================================================
+    # HDF5 Writing
+    # =========================================================================
+
+    def _open_h5_file(
+        self,
+        path: str,
+        test_name: str,
+        step_size: float,
+        total_distance: float,
+        speed: float,
+        averages: int,
+        force_limit: float,
+        pattern: str,
+        cycles: int,
+    ) -> None:
+        """Open HDF5 file and write metadata.
+
+        Args:
+            path: File path for the HDF5 file.
+            test_name: User-provided test name.
+            step_size: FD step size in mm.
+            total_distance: FD total distance in mm.
+            speed: FD speed in mm/s.
+            averages: Number of force averages per point.
+            force_limit: User force limit in N.
+            pattern: Direction pattern name.
+            cycles: Number of cycles.
+        """
+        self._h5file = h5py.File(path, "w")
+        meta = self._h5file.create_group("Metadata")
+        meta.attrs["TestName"] = test_name
+        meta.attrs["DateTimeISO"] = datetime.now().isoformat(timespec="seconds")
+        meta.attrs["SchemaVersion"] = "1.0"
+        meta.attrs["TestType"] = "Force-Deflection"
+        meta.attrs["FD_StepSize_mm"] = step_size
+        meta.attrs["FD_TotalDistance_mm"] = total_distance
+        meta.attrs["FD_Speed_mm_s"] = speed
+        meta.attrs["FD_ForceAverages"] = averages
+        meta.attrs["FD_ForceLimit_N"] = force_limit
+        meta.attrs["FD_DirectionPattern"] = pattern
+        meta.attrs["FD_CyclesPerPosition"] = cycles
+        self._h5file.create_group("FDRuns")
+        self._h5file.create_group("Summary")
+        self._h5file.flush()
+
+    def _write_data_h5(self, data: List[PhaseData]) -> None:
+        """Write measurement data to HDF5.
+
+        Args:
+            data: List of PhaseData from the completed measurement.
+        """
+        if self._h5file is None:
+            return
+        fd_runs = self._h5file["FDRuns"]
+        assert isinstance(fd_runs, h5py.Group)
+        grp = fd_runs.create_group("P0")  # single position
+
+        all_disp: List[float] = []
+        all_force: List[float] = []
+        all_cycle: List[int] = []
+        all_phase: List[str] = []
+
+        for phase in data:
+            for pt in phase.points:
+                all_disp.append(pt.position_mm)
+                all_force.append(pt.force_n)
+                all_cycle.append(phase.cycle_number)
+                all_phase.append(phase.phase_name)
+
+        grp.create_dataset(
+            "displacement_mm", data=np.array(all_disp, dtype=np.float64)
+        )
+        grp.create_dataset(
+            "force_n", data=np.array(all_force, dtype=np.float64)
+        )
+        grp.create_dataset(
+            "cycle", data=np.array(all_cycle, dtype=np.int32)
+        )
+        dt = h5py.string_dtype()
+        grp.create_dataset(
+            "phase", data=np.array(all_phase, dtype=object), dtype=dt
+        )
+
+        # Statistics
+        stats = grp.create_group("Statistics")
+        forces_arr = np.array(all_force)
+        stats.create_dataset(
+            "max_force_n",
+            data=float(np.max(forces_arr)) if len(forces_arr) else 0.0,
+        )
+        stats.create_dataset(
+            "min_force_n",
+            data=float(np.min(forces_arr)) if len(forces_arr) else 0.0,
+        )
+        stats.create_dataset("num_points", data=len(forces_arr))
+        zero_crossings = self._find_zero_crossings(all_disp, all_force)
+        stats.create_dataset(
+            "zero_crossings",
+            data=json.dumps(zero_crossings),
+            dtype=h5py.string_dtype(),
+        )
+
+        grp.create_group("Plot")
+        self._h5file.flush()
+
+    def _find_zero_crossings(
+        self, positions: List[float], forces: List[float]
+    ) -> List[Dict[str, float]]:
+        """Find zero-crossing positions with local slope.
+
+        Args:
+            positions: Displacement values in mm.
+            forces: Force values in N.
+
+        Returns:
+            List of dicts with ``position_mm`` and ``slope_N_per_mm``.
+        """
+        crossings: List[Dict[str, float]] = []
+        for i in range(len(positions) - 1):
+            if forces[i] * forces[i + 1] < 0:
+                p1, f1 = positions[i], forces[i]
+                p2, f2 = positions[i + 1], forces[i + 1]
+                zero_pos = p1 + (p2 - p1) * (-f1) / (f2 - f1)
+                window = 5
+                start = max(0, i - window)
+                end = min(len(positions), i + window + 1)
+                slope_pts_x = positions[start:end]
+                slope_pts_y = forces[start:end]
+                slope = 0.0
+                if len(slope_pts_x) >= 2:
+                    slope = float(np.polyfit(slope_pts_x, slope_pts_y, 1)[0])
+                crossings.append({
+                    "position_mm": round(zero_pos, 4),
+                    "slope_N_per_mm": round(slope, 6),
+                })
+        return crossings
+
+    @staticmethod
+    def _widget_to_png(widget: QWidget) -> Optional[bytes]:
+        """Grab a widget's visual content as PNG bytes.
+
+        Args:
+            widget: The widget to capture.
+
+        Returns:
+            Raw PNG bytes, or None on failure.
+        """
+        pixmap = widget.grab()
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.ReadWrite)
+        if not pixmap.save(buf, "PNG"):
+            return None
+        return bytes(buf.data().data())  # type: ignore[arg-type]
+
+    def _write_plots_to_h5(self) -> None:
+        """Write plot PNG to HDF5."""
+        if self._h5file is None:
+            return
+
+        # Overview plot
+        summary = self._h5file["Summary"]
+        assert isinstance(summary, h5py.Group)
+        png_data = self._widget_to_png(self._plot_widget)
+        if png_data:
+            summary.create_dataset(
+                "overview_plot",
+                data=np.frombuffer(png_data, dtype=np.uint8),
+            )
+
+        # Per-position plot (same as overview for single position)
+        fd_runs = self._h5file["FDRuns"]
+        assert isinstance(fd_runs, h5py.Group)
+        if "P0" in fd_runs:
+            p0 = fd_runs["P0"]
+            assert isinstance(p0, h5py.Group)
+            if "Plot" in p0 and png_data:
+                plot_grp = p0["Plot"]
+                assert isinstance(plot_grp, h5py.Group)
+                plot_grp.create_dataset(
+                    "fd_plot",
+                    data=np.frombuffer(png_data, dtype=np.uint8),
+                )
+        self._h5file.flush()
+
+    def _close_h5(self) -> None:
+        """Flush and close the HDF5 file if open."""
+        if self._h5file is not None:
+            try:
+                self._h5file.flush()
+                self._h5file.close()
+            except Exception:
+                pass
+            self._h5file = None
+
+    # =========================================================================
     # Signal Handlers (UI thread)
     # =========================================================================
 
@@ -830,6 +1103,17 @@ class ForceDeflectionWindow(QMainWindow):
         self._set_controls_enabled(True)
         self._start_btn.setEnabled(True)
         self._progress_label.setText("Measurement complete")
+
+        # Write HDF5 data and plots
+        if self._h5file is not None:
+            try:
+                self._write_data_h5(self._experiment_data)
+                self._write_plots_to_h5()
+            except Exception as exc:
+                self._log(f"Error writing HDF5: {exc}", "error")
+            self._close_h5()
+            self._log(f"HDF5 saved to: {self._h5path}", "info")
+
         self._force_timer.start()
         self._analysis_group.setVisible(True)
         self._compute_analysis()
@@ -847,6 +1131,7 @@ class ForceDeflectionWindow(QMainWindow):
         self._start_btn.setEnabled(True)
         self._progress_label.setText(f"Aborted: {reason}")
         self._force_timer.start()
+        self._close_h5()
         if self._experiment_data:
             self._analysis_group.setVisible(True)
             self._compute_analysis()
@@ -1054,6 +1339,7 @@ class ForceDeflectionWindow(QMainWindow):
             # Give the thread a moment to notice
             if self._test_thread and self._test_thread.is_alive():
                 self._test_thread.join(timeout=3.0)
+        self._close_h5()
         self._client.disconnect()
         super().closeEvent(event)
 
@@ -1064,7 +1350,7 @@ class ForceDeflectionWindow(QMainWindow):
 
 
 def main() -> None:
-    """Launch the Force-Deflection V2 application."""
+    """Launch the ForceDeflection_NoMotor application."""
     app = QApplication(sys.argv)
     window = ForceDeflectionWindow()
     window.show()
