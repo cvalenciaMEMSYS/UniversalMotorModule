@@ -1,6 +1,6 @@
 # Universal Motor Module
 
-Full-featured motor control system supporting TMC2209/TMC2208 stepper drivers and RZ7899-MS H-bridge DC motor controllers, built with PlatformIO for ESP32-S3 Super Mini.
+Full-featured motor control system supporting TMC2209/TMC2208 stepper drivers, STSPIN220 simple stepper drivers, and RZ7899-MS H-bridge DC motor controllers, built with PlatformIO for ESP32-S3 Super Mini. Automatically detects connected hardware via jumper pins.
 
 **Features:**
 - 🚀 **FastAccelStepper** library for high-performance pulse generation (up to 200kHz+)
@@ -8,6 +8,8 @@ Full-featured motor control system supporting TMC2209/TMC2208 stepper drivers an
 - 📍 **Hardware position tracking** - accurate step counting
 - ⚡ **S-curve acceleration** for smooth motion
 - 🔄 **Auto-enable/disable** for power saving
+- 🔍 **Auto-detect hardware** - jumper-based driver selection at startup
+- 💡 **WS2812 status LED** - color-coded system state feedback
 
 ## 🎯 Quick Start
 
@@ -96,298 +98,395 @@ pio device monitor
 ### 4. Test It!
 Open Serial Monitor (115200 baud), you should see:
 ```
-==============================================
-   Universal Motor Module
-   ESP32-S3 Super Mini Edition
-==============================================
-✓ UART initialized successfully
-✓ DC Motor H-Bridge initialized (GPIO 8, 9)
-✓ TMC2209 Connection Successful!
+╔═══════════════════════════════════════════════════════════╗
+║         UNIVERSAL MOTOR MODULE v1.0                       ║
+╚═══════════════════════════════════════════════════════════╝
+
+[Hardware detection info — auto-detects driver via jumper pins]
+
+✓ Motor controller ready!
+  Driver: TMC2209
 ```
 
-Press **'h'** for the interactive menu, then:
-- **'1'** - Rotate clockwise
-- **'2'** - Rotate counter-clockwise
-- **'7'** - Toggle quiet/torque mode
-- **'d'** - Display diagnostics
+Type `help` to see all available commands, then try:
+- `move 200` — Rotate 200 steps forward
+- `move -200` — Rotate 200 steps backward
+- `status` — Show full motor status
+- `stealthchop` — Switch to silent mode
 
 ---
 
 ## 📋 Features
 
 ### Motor Control
-- ✅ **Precise positioning** - Hardware-based step counting
+- ✅ **Text-based command interface** - Human-readable serial commands (115200 baud)
+- ✅ **Precise positioning** - Hardware-based step counting via FastAccelStepper
 - ✅ **High-speed operation** - Up to 200kHz+ step rates
-- ✅ **Bidirectional rotation** - Clockwise and counter-clockwise
-- ✅ **Speed control** - Adjustable on-the-fly
+- ✅ **Bidirectional rotation** - Relative and absolute positioning
+- ✅ **Speed control** - Adjustable on-the-fly via `set speed`
 - ✅ **Acceleration profiles** - Trapezoidal and S-curve (cubesteps)
-- ✅ **Continuous rotation** - Run forward/backward with acceleration
+- ✅ **Continuous rotation** - `run forward` / `run backward` with acceleration
 - ✅ **Auto-enable/disable** - Automatic motor power management
-- ✅ **DC Motor Control** - Forward/backward with PWM speed
+- ✅ **DC Motor Control** - Forward/backward with PWM speed via unified commands
+- ✅ **Multi-driver support** - TMC2209, TMC2208, STSPIN220, and DC Motor (RZ7899)
 
-### Advanced TMC2209 Features
+### Hardware Detection
+- ✅ **Auto-detect driver** - Jumper-based hardware detection at startup
+- ✅ **No code changes needed** - Same firmware works with all supported drivers
+- ✅ **Detection pins** - GPIO 10/13 (VCC source), GPIO 11/12 (sense inputs)
+
+### Status LED (WS2812 NeoPixel)
+- ✅ **Color-coded driver type** - Green (TMC2209), Cyan (TMC2208), Magenta (STSPIN220), Blue (DC Motor)
+- ✅ **System state indication** - Ready, Moving, Idle, Error, Warning, Stall
+- ✅ **Command feedback** - Orange flash on command received
+- ✅ **Startup animation** - RGB chase sequence on boot
+
+### Advanced TMC2209/TMC2208 Features
 - ✅ **StealthChop™** - Ultra-quiet operation
 - ✅ **SpreadCycle™** - Maximum torque mode
-- ✅ **StallGuard™** - Sensorless homing and stall detection
-- ✅ **CoolStep™** - Automatic energy optimization
+- ✅ **StallGuard™** - Sensorless homing and stall detection (TMC2209)
 - ✅ **PWM Autoscale** - Automatic current adjustment
+- ✅ **Step/Dir fallback** - Works without UART if communication fails
+
+### STSPIN220 Features
+- ✅ **Simple Step/Dir** - No communication needed, just wire and go
+- ✅ **Auto standby** - Driver auto-manages power internally (no EN pin needed)
+- ✅ **Full step mode** - Hardware-configured microstepping via MODE pins
+- ✅ **Hardware current limit** - Set via Vref potentiometer on Pololu board
 
 ### Safety & Diagnostics
 - ✅ **Thermal monitoring** - Overtemperature warnings
 - ✅ **Short circuit detection** - Phase A & B monitoring
 - ✅ **Open load detection** - Disconnected motor detection
-- ✅ **Real-time diagnostics** - Complete driver status readout
+- ✅ **Real-time diagnostics** - Complete driver status readout via `diag`
+- ✅ **Input validation** - Range checking on all command parameters
 
 ---
 
 ## 🎮 Serial Commands & Examples
 
-### Basic Movement Commands
+All commands are text-based, entered via Serial Monitor at **115200 baud**. Commands are case-insensitive. The system echoes each command with a `> ` prefix and flashes the LED orange on receipt.
 
-**Command '1' - Rotate Clockwise**
-```
-Input:  1
-Action: Motor rotates 200 steps clockwise (1 full revolution)
-Output: Rotating clockwise (200 steps)...
-```
+### Motion Commands
 
-**Command '2' - Rotate Counter-Clockwise**
+**`move <steps>` — Relative Move**
 ```
-Input:  2
-Action: Motor rotates 200 steps counter-clockwise
-Output: Rotating counter-clockwise (200 steps)...
-```
+Input:  move 200
+Output: > move 200
+        Complete
 
-**Command '3' - Continuous Rotation CW**
-```
-Input:  3
-Action: Motor spins continuously clockwise
-Output: Continuous rotation CW (press '0' to stop)
-Note:   Press '0' to stop the rotation
+Input:  move -50
+Output: > move -50
+        Complete
+Note:   Range: ±1,000,000 steps per command
 ```
 
-**Command '4' - Continuous Rotation CCW**
+**`abs <position>` — Absolute Move**
 ```
-Input:  4
-Action: Motor spins continuously counter-clockwise
-Output: Continuous rotation CCW (press '0' to stop)
-Note:   Press '0' to stop the rotation
+Input:  abs 1000
+Output: > abs 1000
+        Complete
+Note:   Stepper: position must be ≥ 0 (max 100,000,000)
+        DC Motor: value is speed -100 to +100 (negative = reverse)
 ```
 
-**Command '0' - Stop Continuous Rotation**
+**`run forward` — Continuous Forward Rotation**
 ```
-Input:  0
-Action: Stops any continuous rotation
-Output: Stopped
+Input:  run forward
+Output: > run forward
+Note:   Aliases: "runforward", "run f"
+        Use "stop" or "brake" to halt
+```
+
+**`run backward` — Continuous Backward Rotation**
+```
+Input:  run backward
+Output: > run backward
+Note:   Aliases: "runbackward", "run b"
+        Use "stop" or "brake" to halt
+```
+
+**`stop` — Emergency Stop**
+```
+Input:  stop
+Output: > stop
+        Emergency stop!
+Note:   Immediate halt, no deceleration ramp
+```
+
+**`brake` — Controlled Stop**
+```
+Input:  brake
+Output: > brake
+        Braking with deceleration...
+Note:   Decelerates to stop using configured acceleration profile
+```
+
+**`home` — Find Home Position**
+```
+Input:  home
+Output: > home
+        Homing...
+Note:   TMC2209 only — uses StallGuard for sensorless homing
 ```
 
 ---
 
-### Speed Control Commands
+### Query Commands
 
-**Command '5' - Increase Speed**
+**`get pos` — Current Position**
 ```
-Input:  5
-Action: Reduces delay between steps (faster motion)
-Output: Speed increased. Delay: 900 µs
-Note:   Minimum delay is 100µs
+Input:  get pos
+Output: Position: 1000 steps
 ```
 
-**Command '6' - Decrease Speed**
+**`get target` — Target Position**
 ```
-Input:  6
-Action: Increases delay between steps (slower motion)
-Output: Speed decreased. Delay: 1100 µs
-Note:   Maximum delay is 5000µs
+Input:  get target
+Output: Target: 2000 steps
 ```
 
----
-
-### Driver Mode Commands
-
-**Command '7' - Toggle Chopper Mode**
+**`get speed` — Actual Speed**
 ```
-Input:  7
-Action: Toggles between StealthChop (quiet) and SpreadCycle (torque)
-Output: StealthChop ENABLED (Quiet mode)
-   OR:  SpreadCycle ENABLED (High torque mode)
-Use:    These modes are mutually exclusive (only one can be active)
-        StealthChop = Ultra-quiet, best for 3D printing, low-noise
-        SpreadCycle = Maximum torque, best for CNC, heavy loads
-Note:   Press '7' repeatedly to switch between modes
+Input:  get speed
+Output: Current speed: 500 steps/s
+```
+
+**`get rampstate` — Ramp Generator State**
+```
+Input:  get rampstate
+Output: Ramp state: ACCELERATING (direction: FORWARD)
+Note:   States: IDLE, COASTING, ACCELERATING, DECELERATING, REVERSING
 ```
 
 ---
 
 ### Configuration Commands
 
-**Command '9' - Change Microstepping**
+**`set speed <val>` — Maximum Speed**
 ```
-Input:  9
-Output: Select microstepping:
-        1: 1  | 2: 2  | 3: 4  | 4: 8
-        5: 16 | 6: 32 | 7: 64 | 8: 128 | 9: 256
-
-Input:  5 (for example)
-Output: Microstepping set to: 16
-Note:   Higher = smoother but slower maximum speed
+Input:  set speed 2000
+Output: Speed set to 2000.00 steps/sec
+Note:   Range: 1 to 200,000 steps/sec
 ```
 
-**Command 'c' - Change Motor Current**
+**`set accel <val>` — Acceleration**
 ```
-Input:  c
-Output: Enter RMS current in mA (e.g., 800):
-
-Input:  1000
-Output: Current set to: 1000 mA
-Note:   Use 70-80% of your motor's rated current
-        Range: 100-2000 mA
+Input:  set accel 500
+Output: Acceleration set to 500.00 steps/sec²
+Note:   Range: 0 to 1,000,000 steps/sec²
+        0 = constant velocity (very high accel, no ramp)
+        Alias: "set acceleration <val>"
 ```
 
-**Command 'e' - Toggle Enable/Disable**
+**`set cubesteps <n>` — S-Curve Smoothing**
 ```
-Input:  e
-Output: Driver DISABLED
-Input:  e (again)
-Output: Driver ENABLED
-Note:   When disabled, motor has no holding torque
+Input:  set cubesteps 100
+Output: (S-curve ramp applied over 100 steps)
+Note:   0 = trapezoidal acceleration (default)
+        >0 = S-curve smoothing over N steps (max 10,000)
 ```
 
-**Command 'r' - Reset Driver**
+**`set current <mA>` — Motor Run Current**
 ```
-Input:  r
-Output: Resetting driver...
-        Driver reset complete
-Note:   Restores default settings (current, microsteps, mode)
+Input:  set current 800
+Output: Current set to 800 mA
+Note:   Range: 100 to 3,000 mA (UART drivers only)
+        Use 70-80% of your motor's rated current
+```
+
+**`set ihold <%>` — Hold Current Percent**
+```
+Input:  set ihold 50
+Output: (Hold current set to 50% of run current)
+Note:   Range: 0-100%. Default: 0% (no hold)
+```
+
+**`set microsteps <n>` — Microstepping**
+```
+Input:  set microsteps 32
+Output: Microsteps set to 32
+Note:   Must be power of 2: 1, 2, 4, 8, 16, 32, 64, 128, 256
+        UART drivers only. Higher = smoother but slower max speed
+```
+
+**`set autodisable on|off` — Auto Enable/Disable**
+```
+Input:  set autodisable off
+Output: (Auto-disable turned off)
+Note:   When ON (default), motor is automatically disabled after moves
 ```
 
 ---
 
-### Diagnostic Commands
+### Enable/Disable
 
-**Command 's' - Read StallGuard Value**
+**`enable` / `disable` — Motor Driver Power**
 ```
-Input:  s
-Output: === StallGuard Reading ===
-        SG Result: 142
-        SG Threshold: 10
-        Standstill: No
-Note:   High value = light load, Low value = heavy load/stall
-```
+Input:  enable
+Output: Motor enabled
 
-**Command 'd' - Full Diagnostics**
-```
-Input:  d
-Output: === TMC2209 Diagnostics ===
-        StallGuard Result: 156
-        CS Actual: 18
-        Standstill: 0
-        Open Load A: 0
-        Open Load B: 0
-        Low-side short A: 0
-        Low-side short B: 0
-        Ground short A: 0
-        Ground short B: 0
-        Overtemperature: 0
-        Overtemp Warning: 0
-        Temperature: ✓ Normal
-        
-        === Current Configuration ===
-        RMS Current: 800 mA
-        Microsteps: 16
-        PWM Scale: 43
-        Mode: StealthChop
-        TOFF: 5
-Note:   All values should be 0 for error flags
-        Temperature should show "Normal"
+Input:  disable
+Output: Motor disabled
+Note:   When disabled, motor has no holding torque
 ```
 
-**Command 'h' - Show Help Menu**
+---
+
+### UART Control (TMC2209/TMC2208 Only)
+
+**`stealthchop` — Silent Mode**
 ```
-Input:  h
-Output: ========================================
-            TMC2209 Control Menu
-        ========================================
-        Basic Movement:
-          1 - Rotate clockwise (200 steps)
-          2 - Rotate counter-clockwise (200 steps)
-          ...
-        ========================================
+Input:  stealthchop
+Output: (StealthChop enabled)
+Note:   Ultra-quiet operation, best for low-noise applications
 ```
 
-**Command 'x' - Restart ESP32**
+**`spreadcycle` — High Torque Mode**
 ```
-Input:  x
-Output: Restarting ESP32...
+Input:  spreadcycle
+Output: (SpreadCycle enabled)
+Note:   Maximum torque, best for CNC and heavy loads
+```
+
+**`pwmautoscale on|off` — Auto Current Reduction**
+```
+Input:  pwmautoscale on
+Output: (PWM autoscale enabled)
+Note:   Automatically reduces current when motor has low load
+```
+
+**`stepdir on|off` — Step/Dir Fallback Mode**
+```
+Input:  stepdir on
+Output: (Step/Dir mode enabled, UART commands disabled)
+Note:   Bypasses UART, uses only STEP/DIR pins
+        Useful if UART communication is unreliable
+```
+
+**`reconfigure` — Re-apply UART Settings**
+```
+Input:  reconfigure
+Output: Reconfiguring TMC2209...
+Note:   Re-sends all UART config to driver. Alias: "reconfig"
+        Useful after power glitch or driver reset
+```
+
+**`scan` — Scan UART Addresses**
+```
+Input:  scan
+Output: (Scans all 4 TMC2209 UART addresses)
+Note:   TMC2209 only. Useful for debugging multi-driver setups
+```
+
+---
+
+### Status & Debug Commands
+
+**`status` or `?` — Full Status Report**
+```
+Input:  status
+Output: ╔═══════════════════════════════════════════════════════════╗
+        ║                      MOTOR STATUS                         ║
+        ╚═══════════════════════════════════════════════════════════╝
+
+          Driver:       TMC2209 (UART mode)
+          State:        STOPPED
+          Position:     0 steps
+          Target:       0 steps
+          Speed:        0 / 1000 steps/s (current / max)
+          Ramp:         IDLE
+          Current:      100mA run, 0% hold
+          Accel:        500 steps/s², cubesteps: 0 (trapezoidal)
+          Auto-disable: ON
+```
+
+**`test` or `t` — Connection Test**
+```
+Input:  test
+Output: ✓ Connection OK
+Note:   Tests UART communication with the driver
+```
+
+**`diag` or `r` — Full Diagnostics**
+```
+Input:  diag
+Output: (Complete TMC register readout — StallGuard, current,
+         temperature, error flags, mode, configuration)
+Note:   Shows live data from the driver via UART
+```
+
+**`help` or `h` — Show All Commands**
+```
+Input:  help
+Output: ┌─────────────────────────────────────────────────────────────┐
+        │                     AVAILABLE COMMANDS                      │
+        ├─────────────────────────────────────────────────────────────┤
+        │  Motion:                                                    │
+        │    move <steps>      Relative move (+ or -)                 │
+        │    abs <position>    Move to absolute position (>= 0)       │
+        │    ...                                                      │
+        └─────────────────────────────────────────────────────────────┘
+```
+
+**`reboot` or `restart` — Restart ESP32**
+```
+Input:  reboot
+Output: Rebooting...
+        [LED plays rainbow sweep → fade animation]
         [Device restarts and shows startup banner]
-Note:   Performs software reset via esp_restart()
-        Useful for applying changes or recovering from errors
+Note:   Performs software reset via ESP.restart()
 ```
 
 ---
 
 ### Quick Command Reference
 
-| Key | Function | Expected Response |
-|-----|----------|-------------------|
-| **1** | Rotate CW | `Rotating clockwise (200 steps)...` |
-| **2** | Rotate CCW | `Rotating counter-clockwise (200 steps)...` |
-| **3** | Continuous CW | `Continuous rotation CW (press '0' to stop)` |
-| **4** | Continuous CCW | `Continuous rotation CCW (press '0' to stop)` |
-| **0** | Stop | `Stopped` |
-| **5** | Speed Up | `Speed increased. Delay: XXX µs` |
-| **6** | Speed Down | `Speed decreased. Delay: XXX µs` |
-| **7** | Toggle Chopper | `StealthChop ENABLED` or `SpreadCycle ENABLED` |
-| **9** | Microstepping | Menu → `Microstepping set to: XX` |
-| **c** | Current | Prompt → `Current set to: XXXX mA` |
-| **e** | Toggle Enable | `Driver ENABLED` or `Driver DISABLED` |
-| **r** | Reset | `Resetting driver...` → `Driver reset complete` |
-| **s** | StallGuard | StallGuard data with SG result and threshold |
-| **d** | Diagnostics | Complete driver status report (LIVE from UART) |
-| **t** | Test Connection | UART connection test with multiple checks |
-| **h** | Help | Full command menu |
-| **x** | Restart ESP32 | `Restarting ESP32...` → Device reboots |
-| **f** | DC Forward | `DC Motor FORWARD at speed XXX` |
-| **b** | DC Backward | `DC Motor BACKWARD at speed XXX` |
-| **o** | DC Stop | `DC Motor STOPPED (coast)` |
-| **p** | DC Speed | Prompt → `DC Motor speed set to: XXX` |
+| Command | Function | Example |
+|---------|----------|---------|
+| `move <steps>` | Relative move | `move 200`, `move -50` |
+| `abs <position>` | Absolute move / DC speed | `abs 1000`, `abs -75` |
+| `run forward` | Continuous forward | `run f` |
+| `run backward` | Continuous backward | `run b` |
+| `stop` | Emergency stop | `stop` |
+| `brake` | Controlled stop | `brake` |
+| `home` | Sensorless homing (TMC2209) | `home` |
+| `enable` | Enable motor driver | `enable` |
+| `disable` | Disable motor driver | `disable` |
+| `set speed <val>` | Max speed (steps/sec) | `set speed 2000` |
+| `set accel <val>` | Acceleration (steps/sec²) | `set accel 500` |
+| `set cubesteps <n>` | S-curve ramp (0=trap) | `set cubesteps 100` |
+| `set current <mA>` | Motor current (UART only) | `set current 800` |
+| `set ihold <%>` | Hold current percent | `set ihold 50` |
+| `set microsteps <n>` | Microstepping (UART only) | `set microsteps 32` |
+| `set autodisable on/off` | Auto enable/disable | `set autodisable off` |
+| `stealthchop` | Silent mode (TMC only) | `stealthchop` |
+| `spreadcycle` | High torque mode (TMC only) | `spreadcycle` |
+| `pwmautoscale on/off` | Auto current reduction | `pwmautoscale on` |
+| `stepdir on/off` | Step/Dir fallback | `stepdir on` |
+| `reconfigure` | Re-apply UART config | `reconfigure` |
+| `scan` | Scan UART addresses (TMC2209) | `scan` |
+| `status` or `?` | Full status report | `status` |
+| `test` or `t` | Connection test | `test` |
+| `diag` or `r` | Full diagnostics | `diag` |
+| `help` or `h` | Show all commands | `help` |
+| `reboot` / `restart` | Restart ESP32 | `reboot` |
 
 ---
 
-## 🎮 DC Motor Commands
+## 🎮 DC Motor Notes
 
-| Key | Function | Description |
-|-----|----------|-------------|
-| **f** | Forward | DC motor forward at current speed |
-| **b** | Backward | DC motor backward at current speed |
-| **o** | Stop | Stop DC motor (coast mode) |
-| **p** | Speed | Set DC motor PWM speed (0-255) |
+DC motors use the **same unified command interface** as stepper motors. Key differences:
 
-**Command 'f' - DC Motor Forward**
-```
-Input:  f
-Output: DC Motor FORWARD at speed 128
-```
-
-**Command 'b' - DC Motor Backward**
-```
-Input:  b  
-Output: DC Motor BACKWARD at speed 128
-```
-
-**Command 'p' - Set Speed**
-```
-Input:  p
-Output: Enter DC motor speed (0-255):
-Input:  200
-Output: DC Motor speed set to: 200
-```
-
-**Command 'o' - Stop Motor**
-```
-Input:  o
-Output: DC Motor STOPPED (coast)
-```
+| Command | Stepper Behavior | DC Motor Behavior |
+|---------|-----------------|-------------------|
+| `abs <value>` | Move to absolute position (≥ 0) | Set speed (-100 to +100, negative = reverse) |
+| `run forward` | Continuous rotation CW | Motor forward at current speed |
+| `run backward` | Continuous rotation CCW | Motor backward at current speed |
+| `stop` | Emergency stop | Coast stop (motor free) |
+| `brake` | Decelerate to stop | Brake stop (motor locked) |
+| `set speed <val>` | Max speed in steps/sec | Max PWM duty cycle |
+| `enable` / `disable` | Enable/disable driver | Enable/disable H-bridge |
 
 ---
 
@@ -395,36 +494,63 @@ Output: DC Motor STOPPED (coast)
 
 ### Default Settings
 ```cpp
-#define STEP_PIN        5        // Step pulses
-#define DIR_PIN         6        // Direction
-#define ENABLE_PIN      4        // Enable (LOW = on)
-#define RX_PIN          2        // UART receive
-#define TX_PIN          1        // UART transmit
+// Pin Configuration (PinConfig.h)
+constexpr uint8_t TMC_TX_PIN      = 1;    // UART TX (through 1kΩ to RX)
+constexpr uint8_t TMC_RX_PIN      = 2;    // UART RX → TMC2209 PDN_UART/RX
+constexpr uint8_t TMC_EN_PIN      = 4;    // Enable (active LOW)
+constexpr uint8_t TMC_STEP_PIN    = 5;    // Step pulses
+constexpr uint8_t TMC_DIR_PIN     = 6;    // Direction
+constexpr uint8_t DC_IN1_PIN      = 8;    // H-bridge input 1
+constexpr uint8_t DC_IN2_PIN      = 9;    // H-bridge input 2
+constexpr float   TMC_R_SENSE     = 0.11f; // TMC2209 v1.3 sense resistor
 
-#define MOTOR_STEPS     200      // 1.8° motor
-#define MICROSTEPS      16       // 16x microstepping
-#define RMS_CURRENT     800      // 800mA motor current
-#define R_SENSE         0.11f    // TMC2209 v1.3 value
+// Hardware Detection Pins
+constexpr uint8_t DETECT_VCC_1    = 10;   // Output HIGH (VCC source)
+constexpr uint8_t DETECT_VCC_2    = 13;   // Output HIGH (VCC source)
+constexpr uint8_t DETECT_BIT_0    = 11;   // Input pull-down (DC motor flag)
+constexpr uint8_t DETECT_BIT_1    = 12;   // Input pull-down (TMC2208 flag)
 
-// DC Motor H-Bridge (RZ7899-MS)
-#define DC_FI_PIN       8        // Forward Input
-#define DC_BI_PIN       9        // Backward Input
+// Default Motor Parameters (DefaultMotorConfig namespace)
+constexpr uint16_t STEPPER_CURRENT_MA   = 100;    // Safe startup (100mA)
+constexpr uint16_t STEPPER_MICROSTEPS   = 16;     // 16x microstepping
+constexpr float    STEPPER_MAX_SPEED    = 1000.0f; // Steps per second
+constexpr float    STEPPER_ACCELERATION = 500.0f;  // Steps per second²
+constexpr bool     STEPPER_AUTO_DISABLE = true;    // Auto-disable after moves
 ```
+
+### Hardware Detection (Jumper Configuration)
+
+| GPIO 11 | GPIO 12 | Detected Driver |
+|---------|---------|-----------------|
+| LOW | LOW | TMC2209 (default — no jumper needed) |
+| HIGH | LOW | DC Motor (RZ7899) |
+| LOW | HIGH | TMC2208 |
+| HIGH | HIGH | STSPIN220 |
+
+Connect GPIO 11 or 12 to GPIO 10 or 13 (which output HIGH) using a jumper wire to select the driver.
 
 ### Customizing for Your Motor
 
-**1. Set Current (70-80% of rated current):**
-```cpp
-#define RMS_CURRENT     1000     // For 1.4A motor
+**1. Set current at runtime (70-80% of rated current):**
+```
+set current 800
 ```
 
-**2. Adjust Microstepping:**
-```cpp
-#define MICROSTEPS      32       // Higher = smoother, slower
+**2. Adjust microstepping at runtime:**
+```
+set microsteps 32
 ```
 
-**3. Change Pins (if needed):**
-- Safe GPIO pins: 1, 2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 21
+**3. Change defaults in code (`PinConfig.h`):**
+```cpp
+namespace DefaultMotorConfig {
+    constexpr uint16_t STEPPER_CURRENT_MA = 800;   // For your motor
+    constexpr float    STEPPER_MAX_SPEED  = 2000.0f;
+}
+```
+
+**4. Change pins (if needed) in `PinConfig.h`:**
+- Safe GPIO pins: 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21
 - **Avoid:** 0, 3, 19, 20, 43, 44, 45, 46, 48
 
 ---
@@ -447,19 +573,20 @@ Output: DC Motor STOPPED (coast)
 ### "TMC2209 Connection Failed"
 1. Check all GND connections are common
 2. Verify VIO has 3.3V
-3. Try UART Option 2 instead of Option 1
-4. Check resistor value (should be 1kΩ for Option 1)
+3. Try `reconfigure` to re-send UART settings
+4. Check resistor value (should be 1kΩ for single-wire half-duplex)
+5. Try `stepdir on` to use Step/Dir fallback without UART
 
 ### Motor Not Moving
-1. Verify EN pin is LOW (enabled)
-2. Check motor current setting (`'c'` command)
-3. Test with `'1'` or `'2'` commands
-4. Press `'d'` to check for error flags
+1. Type `enable` to ensure driver is powered
+2. Check motor current with `set current 800`
+3. Test with `move 200` or `move -200`
+4. Type `diag` to check for error flags
 
 ### Motor Stuttering/Skipping
-1. Increase motor current (`'c'` command)
-2. Slow down speed (`'6'` command)
-3. Switch to SpreadCycle (`'8'` command)
+1. Increase motor current: `set current 1000`
+2. Slow down speed: `set speed 500`
+3. Switch to SpreadCycle: `spreadcycle`
 4. Check power supply can handle current
 
 ### USB Serial Not Working
@@ -469,15 +596,22 @@ Output: DC Motor STOPPED (coast)
 
 ### Overheating
 1. Add heatsink to TMC2209
-2. Reduce motor current
+2. Reduce motor current: `set current 400`
 3. Add active cooling (fan)
-4. Check for short circuits
+4. Check for short circuits with `diag`
 
 ### DC Motor Not Running
-1. Check H-bridge power connections (VM)
-2. Verify GPIO 8/9 connections to FI/BI
-3. Test with 'f' command - motor should spin
-4. Try increasing speed with 'p' command (e.g., 200)
+1. Check H-bridge power connections (VCC on pin 4, NOT 3.3V)
+2. Verify GPIO 8/9 connections to IN1/IN2
+3. Verify correct jumper: GPIO 11 connected to GPIO 10 or 13
+4. Test with `run forward` — motor should spin
+5. Try setting speed: `abs 50`
+
+### Hardware Detection Issues
+1. Check jumper wires between detection pins (GPIO 10-13)
+2. Type `reboot` to re-run hardware detection
+3. Check startup banner for detected driver type
+4. Ensure jumper connections are solid (no intermittent contact)
 
 ---
 
@@ -490,12 +624,14 @@ platform = espressif32
 board = lolin_s3_mini
 framework = arduino
 monitor_speed = 115200
+upload_speed = 921600
 
 lib_deps = 
     teemuatlut/TMCStepper@^0.7.3
     gin66/FastAccelStepper@^0.33.9
 
 build_flags = 
+    -DARDUINO_USB_MODE=1
     -DARDUINO_USB_CDC_ON_BOOT=1
 ```
 
@@ -520,7 +656,24 @@ pio run -t clean          # Clean build files
 - GPIO 19, 20 - USB D-/D+ (breaks USB)
 - GPIO 43, 44 - UART0 TX/RX (Serial console)
 - GPIO 45, 46 - Strapping pins
-- GPIO 48 - Onboard LED (usually)
+- GPIO 48 - Onboard WS2812 NeoPixel LED (used by status LED)
+
+### Current Pin Assignments
+
+| GPIO | Function | Notes |
+|------|----------|-------|
+| 1 | TMC TX | UART transmit (through 1kΩ to RX) |
+| 2 | TMC RX | UART receive → TMC2209 PDN_UART |
+| 4 | TMC EN | Enable pin (active LOW) |
+| 5 | TMC STEP | Step pulse output |
+| 6 | TMC DIR | Direction output |
+| 8 | DC IN1 | H-bridge input 1 (PWM) |
+| 9 | DC IN2 | H-bridge input 2 (PWM) |
+| 10 | DETECT VCC | Output HIGH for detection jumpers |
+| 11 | DETECT BIT 0 | Input pull-down (DC motor flag) |
+| 12 | DETECT BIT 1 | Input pull-down (TMC2208 flag) |
+| 13 | DETECT VCC | Output HIGH for detection jumpers |
+| 48 | LED | WS2812 NeoPixel status LED |
 
 ---
 

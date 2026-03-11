@@ -11,6 +11,7 @@
 #include "TMC2209Driver.h"
 #include "TMC2208Driver.h"
 #include "DCMotorDriver.h"
+#include "STSPIN220Driver.h"
 
 // Static member initialization
 bool DriverFactory::_detectionInitialized = false;
@@ -51,7 +52,7 @@ MotorType DriverFactory::detectHardware() {
         return MotorType::STEPPER_TMC2208;
     }
     else {
-        return MotorType::UNKNOWN;  // Both HIGH = reserved
+        return MotorType::STEPPER_STSPIN220;  // Both HIGH = STSPIN220
     }
 }
 
@@ -65,6 +66,9 @@ IMotorDriver* DriverFactory::createDriver(MotorType type) {
             
         case MotorType::DC_MOTOR:
             return new DCMotorDriver();
+            
+        case MotorType::STEPPER_STSPIN220:
+            return new STSPIN220Driver();
             
         case MotorType::UNKNOWN:
         default:
@@ -123,7 +127,7 @@ void DriverFactory::printDetectionInfo() {
     Serial.print("Detect Bit 1 (GPIO ");
     Serial.print(DETECT_BIT_1);
     Serial.print("): ");
-    Serial.println(digitalRead(DETECT_BIT_1) ? "HIGH → TMC2208" : "LOW");
+    Serial.println(digitalRead(DETECT_BIT_1) ? "HIGH → TMC2208 (or STSPIN220 if both HIGH)" : "LOW");
     
     Serial.print("\nDetected Type: ");
     Serial.println(motorTypeToString(detectHardware()));
