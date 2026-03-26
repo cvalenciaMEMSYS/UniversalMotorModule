@@ -304,6 +304,9 @@ LEDColor StatusLED::getDriverColor() {
         case DriverType::DC_MOTOR:
             color = LEDColor(0, (uint8_t)(effectiveBrightness * 0.4f), effectiveBrightness);  // Blue
             break;
+        case DriverType::STSPIN220:
+            color = LEDColor(effectiveBrightness, 0, (uint8_t)(effectiveBrightness * 0.7f));  // Magenta
+            break;
         case DriverType::UNKNOWN:
         default:
             color = LEDColor(effectiveBrightness, effectiveBrightness, effectiveBrightness);  // White

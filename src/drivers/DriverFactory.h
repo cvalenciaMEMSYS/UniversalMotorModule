@@ -18,6 +18,7 @@
 class TMC2209Driver;
 class TMC2208Driver;
 class DCMotorDriver;
+class STSPIN220Driver;
 
 /**
  * @brief Factory class for creating motor drivers at runtime
@@ -30,6 +31,7 @@ class DCMotorDriver;
  *   - GPIO 10 & 13: Output HIGH (VCC source for jumpers)
  *   - GPIO 11: If HIGH → DC Motor
  *   - GPIO 12: If HIGH → TMC2208
+ *   - Both HIGH → STSPIN220
  *   - Both LOW → TMC2209 (default)
  */
 class DriverFactory {

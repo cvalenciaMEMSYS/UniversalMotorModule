@@ -22,6 +22,7 @@
  *     - TMC2209:       Green (0, 255, 0)
  *     - TMC2208:       Cyan (0, 255, 200)
  *     - DC Motor:      Blue (0, 100, 255)
+ *     - STSPIN220:     Magenta (255, 0, 180)
  *     - Unknown:       White (255, 255, 255)
  * 
  *   Acceleration Profile → Color Modifier:
@@ -68,7 +69,8 @@ enum class DriverType {
     UNKNOWN,
     TMC2209,
     TMC2208,
-    DC_MOTOR
+    DC_MOTOR,
+    STSPIN220
 };
 
 /**
@@ -111,9 +113,10 @@ enum class MotorType;
  */
 inline DriverType motorTypeToDriverType(MotorType type) {
     switch (static_cast<int>(type)) {
-        case 0: return DriverType::TMC2209;   // STEPPER_TMC2209
-        case 1: return DriverType::TMC2208;   // STEPPER_TMC2208
-        case 2: return DriverType::DC_MOTOR;  // DC_MOTOR
+        case 0: return DriverType::TMC2209;    // STEPPER_TMC2209
+        case 1: return DriverType::TMC2208;    // STEPPER_TMC2208
+        case 2: return DriverType::DC_MOTOR;   // DC_MOTOR
+        case 3: return DriverType::STSPIN220;  // STEPPER_STSPIN220
         default: return DriverType::UNKNOWN;
     }
 }

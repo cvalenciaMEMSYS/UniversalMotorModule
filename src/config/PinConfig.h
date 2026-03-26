@@ -26,7 +26,7 @@
 //   LOW     | LOW     | TMC2209 (default)
 //   HIGH    | LOW     | DC Motor (RZ7899)
 //   LOW     | HIGH    | TMC2208
-//   HIGH    | HIGH    | Reserved/Future
+//   HIGH    | HIGH    | STSPIN220
 
 constexpr uint8_t DETECT_VCC_1    = 10;   // Output HIGH (VCC source)
 constexpr uint8_t DETECT_VCC_2    = 13;   // Output HIGH (VCC source)

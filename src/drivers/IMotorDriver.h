@@ -26,6 +26,7 @@ enum class MotorType {
     STEPPER_TMC2209,   ///< TMC2209 with UART control
     STEPPER_TMC2208,   ///< TMC2208 standalone (Step/Dir only)
     DC_MOTOR,          ///< DC motor with H-bridge (e.g., RZ7899)
+    STEPPER_STSPIN220, ///< STSPIN220 simple Step/Dir driver (no comms)
     UNKNOWN            ///< Unknown or not detected
 };
 
@@ -37,6 +38,7 @@ inline const char* motorTypeToString(MotorType type) {
         case MotorType::STEPPER_TMC2209: return "TMC2209";
         case MotorType::STEPPER_TMC2208: return "TMC2208";
         case MotorType::DC_MOTOR:        return "DC Motor";
+        case MotorType::STEPPER_STSPIN220: return "STSPIN220";
         default:                         return "Unknown";
     }
 }
