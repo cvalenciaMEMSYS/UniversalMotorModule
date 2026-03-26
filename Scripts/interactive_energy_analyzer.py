@@ -95,6 +95,30 @@ def parse_test_id(filename: str) -> Optional[Dict]:
     
     basename = os.path.basename(filename)
     
+    # DC motor constant load pattern: D[n]-CL-[weight]g-[voltage]-[direction]
+    # Examples: D4-CL-300g-6V-N, D4-CL-580g-3V3-R
+    # Voltage format: 6V -> 6.0, 3V3 -> 3.3
+    match_cl = re.match(r'^(D\d+)-CL-(\d+)g-(\d+V\d*)-([NR])', basename)
+    if match_cl:
+        motor = match_cl.group(1)
+        load_g = int(match_cl.group(2))
+        voltage_str = match_cl.group(3)
+        direction = match_cl.group(4)
+        # Parse voltage: "6V" -> 6.0, "3V3" -> 3.3
+        voltage_float = float(voltage_str.replace('V', '.').rstrip('.'))
+        dir_suffix = '-R' if direction == 'R' else '-N'
+        return {
+            'motor': motor,
+            'profile': 'CL',
+            'speed_code': 'MAX',
+            'speed_value': 100,   # 100% duty cycle
+            'voltage': voltage_float,
+            'voltage_str': voltage_str,
+            'load_g': load_g,
+            'direction': direction,
+            'test_id': f"{motor}-CL-{load_g}g-{voltage_str}{dir_suffix}"
+        }
+
     # DC motor pattern: D[n]-DC-[Voltage](-R)
     # Examples: D1-DC-3, D2-DC-5-R, D3-DC-4
     match_dc = re.match(r'^(D\d+)-DC-(\d+)(-R)?', basename)
@@ -322,12 +346,32 @@ class EnergyAnalyzer:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
-        # Left panel - Controls
+        # Left panel - Controls (scrollable)
         control_frame = ttk.LabelFrame(main_frame, text="Controls", padding="5")
         control_frame.grid(row=0, column=0, sticky="ns", padx=5, pady=5)
-        
+
+        # Scrollable canvas inside control_frame
+        self._ctrl_canvas = tk.Canvas(control_frame, width=260, highlightthickness=0)
+        ctrl_scrollbar = ttk.Scrollbar(control_frame, orient="vertical",
+                                       command=self._ctrl_canvas.yview)
+        ctrl_inner = ttk.Frame(self._ctrl_canvas)
+
+        ctrl_inner.bind("<Configure>",
+                        lambda e: self._ctrl_canvas.configure(
+                            scrollregion=self._ctrl_canvas.bbox("all")))
+        self._ctrl_canvas.create_window((0, 0), window=ctrl_inner, anchor="nw")
+        self._ctrl_canvas.configure(yscrollcommand=ctrl_scrollbar.set)
+
+        self._ctrl_canvas.pack(side="left", fill="both", expand=True)
+        ctrl_scrollbar.pack(side="right", fill="y")
+
+        # Mousewheel scrolling
+        def _on_mousewheel(event):
+            self._ctrl_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self._ctrl_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
         # === BATCH PROCESSING SECTION (NEW) ===
-        batch_frame = ttk.LabelFrame(control_frame, text="Batch Processing", padding="5")
+        batch_frame = ttk.LabelFrame(ctrl_inner, text="Batch Processing", padding="5")
         batch_frame.grid(row=0, column=0, sticky="ew", pady=5)
         
         load_frame = ttk.Frame(batch_frame)
@@ -373,10 +417,10 @@ class EnergyAnalyzer:
         ttk.Button(export_frame, text="📈 Generate Plots", 
                    command=self._generate_plots).pack(side="left", padx=2)
         
-        ttk.Separator(control_frame, orient='horizontal').grid(row=1, column=0, sticky="ew", pady=10)
+        ttk.Separator(ctrl_inner, orient='horizontal').grid(row=1, column=0, sticky="ew", pady=10)
         
         # === SINGLE FILE LOADING SECTION ===
-        file_frame = ttk.LabelFrame(control_frame, text="Single File Loading", padding="5")
+        file_frame = ttk.LabelFrame(ctrl_inner, text="Single File Loading", padding="5")
         file_frame.grid(row=2, column=0, sticky="ew", pady=5)
         
         ttk.Button(file_frame, text="Load Joulescope (.jls/.csv)", 
@@ -392,7 +436,7 @@ class EnergyAnalyzer:
         self.force_label.grid(row=4, column=0, pady=2)
         
         # Time alignment section
-        align_frame = ttk.LabelFrame(control_frame, text="Time Alignment", padding="5")
+        align_frame = ttk.LabelFrame(ctrl_inner, text="Time Alignment", padding="5")
         align_frame.grid(row=3, column=0, sticky="ew", pady=5)
         
         ttk.Label(align_frame, text="Force Time Offset (s):").grid(row=0, column=0, sticky="w")
@@ -416,7 +460,7 @@ class EnergyAnalyzer:
                    command=lambda: self._adjust_offset(1)).pack(side="left", padx=2)
         
         # Region selection section
-        select_frame = ttk.LabelFrame(control_frame, text="Region Selection", padding="5")
+        select_frame = ttk.LabelFrame(ctrl_inner, text="Region Selection", padding="5")
         select_frame.grid(row=4, column=0, sticky="ew", pady=5)
         
         ttk.Label(select_frame, text="Click and drag on plot to select region").grid(row=0, column=0)
@@ -439,7 +483,7 @@ class EnergyAnalyzer:
                    command=self._select_all).grid(row=4, column=0, pady=2)
         
         # Statistics display
-        stats_frame = ttk.LabelFrame(control_frame, text="Selected Region Statistics", padding="5")
+        stats_frame = ttk.LabelFrame(ctrl_inner, text="Selected Region Statistics", padding="5")
         stats_frame.grid(row=5, column=0, sticky="ew", pady=5)
         
         self.stats_text = tk.Text(stats_frame, height=12, width=35, font=("Courier", 9))
@@ -447,7 +491,7 @@ class EnergyAnalyzer:
         self.stats_text.insert("1.0", "Select a region to see statistics...")
         
         # Export button (single file mode)
-        ttk.Button(control_frame, text="Export Single Statistics", 
+        ttk.Button(ctrl_inner, text="Export Single Statistics", 
                    command=self._export_stats).grid(row=6, column=0, pady=5)
         
         # Right panel - Plots
@@ -1075,7 +1119,7 @@ class EnergyAnalyzer:
                     'profile': row['profile'],
                     'speed_code': row['speed_code'],
                     'speed_value': int(row['speed_value']),
-                    'voltage': int(row['voltage']),
+                    'voltage': float(row['voltage']) if float(row['voltage']) != int(float(row['voltage'])) else int(row['voltage']),
                     'direction': row['direction'],
                     'selection_start': float(row['selection_start']) if pd.notna(row['selection_start']) else None,
                     'selection_end': float(row['selection_end']) if pd.notna(row['selection_end']) else None,
