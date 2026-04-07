@@ -300,7 +300,7 @@ set accel 0       # Instant speed changes (no ramping)
 |---------|----------|
 | `set current` | No effect (hardware H-bridge) |
 | `set microsteps` | No effect (not a stepper) |
-| `set jerk` | No effect (uses simple ramping) |
+| `set cubesteps` | No effect (uses simple ramping) |
 | `home` | Not supported (no position feedback) |
 | `stepdir` | Not applicable |
 | `reconfigure` | No effect |

@@ -154,8 +154,8 @@ Controls DC motors via an H-bridge (like RZ7899). Uses PWM for speed control.
 ### Wiring
 
 ```
-GPIO 7  →  H-bridge IN1 (PWM capable)
-GPIO 8  →  H-bridge IN2 (PWM capable)
+GPIO 8  →  H-bridge IN1 (PWM capable)
+GPIO 9  →  H-bridge IN2 (PWM capable)
 
 For RZ7899 or similar:
   VCC  →  Motor supply voltage (6-12V typical)
@@ -214,7 +214,7 @@ GPIO 12 ── Detect Bit 1 (pull-down input)
 | LOW | LOW | TMC2209 (default) |
 | HIGH | LOW | DC Motor |
 | LOW | HIGH | TMC2208 |
-| HIGH | HIGH | Reserved |
+| HIGH | HIGH | STSPIN220 (Step/Dir stepper) |
 
 To select a driver, connect jumper wires from VCC pins to the appropriate detect pins.
 

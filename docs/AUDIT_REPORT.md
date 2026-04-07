@@ -45,21 +45,31 @@ The Universal Motor Module is a well-structured embedded motor-control firmware 
 | **Architecture** | 8/10 | Clean separation of concerns; factory pattern; abstract interface |
 | **Code Quality** | 7/10 | Good validation; some magic numbers; minor type-safety gaps |
 | **Test Coverage** | 4/10 | Only command parsing and status struct tested; no integration tests |
-| **Documentation** | 6.5/10 | Comprehensive but contains critical inaccuracies |
-| **STM32 Portability** | 6/10 | ESP32 APIs well-isolated; two major library dependencies |
+| **Documentation** | 7.5/10 | Comprehensive; critical inaccuracies resolved; STM32 porting guide added |
+| **STM32 Portability** | 6.5/10 | ESP32 APIs well-isolated; DC motor portability guide available; two major library dependencies remain |
 
-### Critical Findings
+### Critical Findings — Remediation Status
 
-| # | Severity | Finding |
-|---|----------|---------|
-| 1 | 🔴 CRITICAL | `docs/architecture.md` states TMC2209 UART pins as GPIO 17/18 — actual pins are GPIO 1/2 |
-| 2 | 🔴 CRITICAL | `docs/motor-drivers.md` references `set jerk` command that does not exist — actual command is `set cubesteps` |
-| 3 | 🔴 CRITICAL | Input buffer in `main.cpp` has no maximum length, risking memory exhaustion |
-| 4 | 🟡 HIGH | `static_cast<TMC2209Driver*>` in MotorController.cpp without type verification |
-| 5 | 🟡 HIGH | STSPIN220 driver fully implemented in code but not documented anywhere |
-| 6 | 🟡 HIGH | Error polling only runs when motor is NOT moving (500ms interval) — errors during motion are missed |
-| 7 | 🟡 MEDIUM | DC motor `move(steps)` actually means milliseconds — API semantically overloaded |
-| 8 | 🟡 MEDIUM | `docs/dc-motor-guide.md` shows 8-bit PWM resolution; code uses 10-bit (0–1023) |
+| # | Severity | Finding | Status |
+|---|----------|---------|--------|
+| 1 | 🔴 CRITICAL | `docs/architecture.md` states TMC2209 UART pins as GPIO 17/18 — actual pins are GPIO 1/2 | ✅ **RESOLVED** — Corrected to GPIO 1/2 |
+| 2 | 🔴 CRITICAL | `docs/motor-drivers.md` references `set jerk` command that does not exist — actual command is `set cubesteps` | ✅ **RESOLVED** — All references updated to `set cubesteps` |
+| 3 | 🔴 CRITICAL | Input buffer in `main.cpp` has no maximum length, risking memory exhaustion | ✅ **RESOLVED** — `MAX_INPUT_LENGTH = 128` added (main.cpp line 48) |
+| 4 | 🟡 HIGH | `static_cast<TMC2209Driver*>` in MotorController.cpp without type verification | ⚠️ **OPEN** — Low risk in practice (cast only in TMC2209-specific code paths) |
+| 5 | 🟡 HIGH | STSPIN220 driver fully implemented in code but not documented anywhere | ✅ **RESOLVED** — Added to hardware-detection.md and motor-drivers.md detection table |
+| 6 | 🟡 HIGH | Error polling only runs when motor is NOT moving (500ms interval) — errors during motion are missed | ⚠️ **OPEN** — Accepted design tradeoff; polling during motion could affect timing |
+| 7 | 🟡 MEDIUM | DC motor `move(steps)` actually means milliseconds — API semantically overloaded | ⚠️ **OPEN** — Documented in command-protocol.md; inherent to shared IMotorDriver interface |
+| 8 | 🟡 MEDIUM | `docs/dc-motor-guide.md` shows 8-bit PWM resolution; code uses 10-bit (0–1023) | ✅ **RESOLVED** — Code examples, serial commands, and troubleshooting updated to 10-bit |
+
+### Additional Fixes Applied (Post-Audit)
+
+| # | Fix | Files Changed |
+|---|-----|---------------|
+| 9 | DC motor GPIO pin corrected (GPIO 7→8 for IN1) in motor-drivers.md wiring section | `docs/motor-drivers.md` |
+| 10 | DC motor speed range corrected (0-255→0-1023) in architecture.md | `docs/architecture.md` |
+| 11 | `set jerk` → `set cubesteps` in DC motor non-applicable commands table | `docs/command-protocol.md` |
+| 12 | DC motor serial commands updated from old single-letter (`f`, `b`, `o`, `p`) to current protocol (`run forward`, `run backward`, `stop`, `abs`) | `docs/dc-motor-guide.md` |
+| 13 | STM32 Nucleo L031K6 DC motor portability guide created | `docs/stm32-dc-motor-portability-guide.md` |
 
 ---
 
@@ -175,7 +185,7 @@ UniversalMotorModule/
 #### Issues Found
 | Severity | Issue | Location |
 |----------|-------|----------|
-| 🔴 CRITICAL | `inputBuffer` (Arduino `String`) has no max length — unbounded memory growth | Line 46 |
+| ✅ RESOLVED | ~~`inputBuffer` (Arduino `String`) has no max length — unbounded memory growth~~ Fixed: `MAX_INPUT_LENGTH = 128` caps buffer | Line 48 |
 | 🟡 MEDIUM | 100ms command timeout could split commands over slow serial links | Line 133 |
 | 🔵 LOW | No function-level documentation for `setup()` and `loop()` | Lines 59, 112 |
 
@@ -528,10 +538,9 @@ Nearly identical to TMC2209 with these differences:
 #### Issues Found
 | Severity | Issue |
 |----------|-------|
-| 🟡 MEDIUM | `move(steps)` actually means milliseconds — semantically overloaded with stepper interface |
+| 🟡 MEDIUM | `move(steps)` actually means milliseconds — semantically overloaded with stepper interface (documented in command-protocol.md) |
 | 🟡 MEDIUM | Virtual position counter exists but never meaningfully updated |
-| 🔵 LOW | `brake()` not implemented despite H-bridge supporting it (IN1=HIGH, IN2=HIGH) |
-| 🔵 LOW | No coast vs. brake distinction in stop behavior |
+| 🔵 LOW | Coast vs brake distinction works correctly via `stop()` (coast) and `brake()` (locked) commands |
 
 ---
 
@@ -595,55 +604,58 @@ lib_compat_mode = off
 |------|-------|---------|----------------|
 | README.md | ~450 | Good | Missing STSPIN220 mention |
 | Quick_Wiring_Guide_Custom_Pins.md | 314 | Excellent | — |
-| docs/architecture.md | 387 | Good | 🔴 **Wrong GPIO pins for TMC2209 UART** |
-| docs/command-protocol.md | 380 | Excellent | Missing `set jerk` clarification |
-| docs/dc-motor-guide.md | 369 | Very Good | PWM resolution mismatch (8-bit vs 10-bit) |
+| docs/architecture.md | 387 | Good | ✅ GPIO pin error fixed |
+| docs/command-protocol.md | 380 | Excellent | ✅ `set jerk` → `set cubesteps` fixed |
+| docs/dc-motor-guide.md | 369 | Very Good | ✅ PWM resolution and serial commands updated |
 | docs/esp32-s3-hardware.md | 236 | Excellent | — |
 | docs/fastaccelstepper.md | 167 | Good | — |
-| docs/hardware-detection.md | 73 | Good | STSPIN220 listed as "Reserved/Future" |
+| docs/hardware-detection.md | 86 | Good | ✅ STSPIN220 documented |
 | docs/hardware-testing-validation.md | 866 | Excellent | Sign-off section empty |
 | docs/led-status-codes.md | 150 | Good | Color naming inconsistency |
-| docs/motor-drivers.md | 273 | Good | 🔴 **References non-existent `set jerk` command** |
+| docs/motor-drivers.md | 273 | Good | ✅ `set jerk`, GPIO pin, detection table fixed |
+| docs/stm32-dc-motor-portability-guide.md | 505 | Good | **New** — STM32 DC motor porting guide |
 | docs/tmc2209-guide.md | ~500 | Very Good | — |
 | docs/troubleshooting.md | 222 | Excellent | — |
 | docs/CHANGELOG.md | 81 | Good | Both versions dated same month |
 | docs/arduino-core-version.md | 160 | Excellent | — |
 | docs/energy-measurement-test-plan.md | ~700 | Good | Large, not fully analyzed |
-| docs/testing_results.md | ~100 | Adequate | References removed source files |
+| docs/testing_results.md | ~100 | Adequate | References removed source files (MCPWMStepper) |
 
 ### Critical Documentation-Code Mismatches
 
-#### 1. GPIO Pin Error in architecture.md
+#### 1. ✅ RESOLVED — GPIO Pin Error in architecture.md
 ```
 DOCUMENTED:  TMC2209 UART uses RX=GPIO 17, TX=GPIO 18
 ACTUAL CODE: TMC_TX_PIN=1, TMC_RX_PIN=2 (PinConfig.h)
-IMPACT:      Users wiring based on this document will fail
+FIX:         Corrected to GPIO 1 (TX) and GPIO 2 (RX)
 ```
 
-#### 2. Non-existent Command in motor-drivers.md
+#### 2. ✅ RESOLVED — Non-existent Command in motor-drivers.md
 ```
 DOCUMENTED:  "set jerk 5000" for S-curve acceleration
 ACTUAL:      "set cubesteps <value>" is the real command (MotorController.cpp)
-NOTE:        command-protocol.md correctly lists "set cubesteps"
+FIX:         All instances updated to "set cubesteps"; command-protocol.md also fixed
 ```
 
-#### 3. STSPIN220 Undocumented
+#### 3. ✅ RESOLVED — STSPIN220 Undocumented
 ```
 CODE:        Full STSPIN220Driver implementation, factory detection (both bits HIGH)
-DOCS:        hardware-detection.md says "Reserved/Future" for both-HIGH condition
-             No STSPIN220 wiring guide, no mention in README
+DOCS:        hardware-detection.md said "Reserved/Future" for both-HIGH condition
+FIX:         STSPIN220 added to hardware-detection.md and motor-drivers.md detection tables
 ```
 
-#### 4. PWM Resolution Mismatch
+#### 4. ✅ RESOLVED — PWM Resolution Mismatch
 ```
-dc-motor-guide.md: Shows "8-bit resolution (0-255 duty cycle)"
+dc-motor-guide.md: Showed "8-bit resolution (0-255 duty cycle)" in examples
 PinConfig.h:       DC_PWM_RES = 10 (10-bit = 0-1023)
+FIX:               Code examples updated to 10-bit values; serial commands updated to current protocol
 ```
 
 #### 5. Stale References in testing_results.md
 ```
 References:  MCPWMStepper.cpp, AccelerationProfile.h
 Reality:     These files were removed in v2.0 (per CHANGELOG.md)
+Status:      Retained as historical record of v1.0→v2.0 migration issues
 ```
 
 ---
@@ -724,15 +736,15 @@ This section catalogs every ESP32-specific API and peripheral for STM32 translat
 
 ### Memory Management
 - Driver objects allocated with `new` in DriverFactory but never `delete`d
-- `inputBuffer` in main.cpp is unbounded Arduino `String`
+- ~~`inputBuffer` in main.cpp is unbounded Arduino `String`~~ ✅ Fixed: capped at 128 characters
 - TMCStepper object allocated with `new`, freed in destructor
 - FastAccelStepper objects managed by library (not explicitly freed)
 
 ### Error Handling Gaps
 1. **No watchdog timer** — motor lockup could freeze system indefinitely
-2. **No input buffer limit** — could exhaust RAM with long input
+2. ~~**No input buffer limit** — could exhaust RAM with long input~~ ✅ Fixed
 3. **No motor lockup detection** — `stop()` has no timeout
-4. **Error polling paused during motion** — 500ms gap between checks only when idle
+4. **Error polling paused during motion** — 500ms gap between checks only when idle (accepted tradeoff)
 5. **Silent configuration failures** — STSPIN220 config methods return no error
 
 ### Type Safety
@@ -789,33 +801,33 @@ For equivalent capabilities (MCPWM, multiple UARTs, USB CDC, adequate GPIO):
 
 ### 🔴 P0 — Fix Before Translation (Critical)
 
-| # | Action | Details |
-|---|--------|---------|
-| 1 | **Fix architecture.md GPIO pins** | Change TMC2209 UART from "GPIO 17/18" to "GPIO 1/2" |
-| 2 | **Fix motor-drivers.md command** | Remove `set jerk` references; clarify `set cubesteps` |
-| 3 | **Add input buffer limit** | Cap `inputBuffer` in main.cpp at 256 characters |
-| 4 | **Add type-safe driver casting** | Use `dynamic_cast` or store driver type for runtime check |
+| # | Action | Details | Status |
+|---|--------|---------|--------|
+| 1 | **Fix architecture.md GPIO pins** | Change TMC2209 UART from "GPIO 17/18" to "GPIO 1/2" | ✅ Done |
+| 2 | **Fix motor-drivers.md command** | Remove `set jerk` references; clarify `set cubesteps` | ✅ Done |
+| 3 | **Add input buffer limit** | Cap `inputBuffer` in main.cpp at 128 characters | ✅ Done |
+| 4 | **Add type-safe driver casting** | Use `dynamic_cast` or store driver type for runtime check | ⚠️ Open (low risk) |
 
 ### 🟡 P1 — Fix Before Translation (Important)
 
-| # | Action | Details |
-|---|--------|---------|
-| 5 | **Document STSPIN220 driver** | Add wiring guide, update detection truth table, add to README |
-| 6 | **Fix dc-motor-guide.md** | Update PWM resolution from 8-bit to 10-bit |
-| 7 | **Remove stale references** | Update testing_results.md to remove MCPWMStepper references |
-| 8 | **Add hardware abstraction layer** | Create a HAL header for `millis()`, `Serial`, GPIO that can be swapped for STM32 |
-| 9 | **Increase test coverage** | Add tests for MotorController.processCommand() using existing mock infrastructure |
+| # | Action | Details | Status |
+|---|--------|---------|--------|
+| 5 | **Document STSPIN220 driver** | Add to detection truth table, hardware-detection.md | ✅ Done |
+| 6 | **Fix dc-motor-guide.md** | Update PWM resolution, serial commands, GPIO pins | ✅ Done |
+| 7 | **Remove stale references** | Update testing_results.md MCPWMStepper refs | ⚠️ Retained as historical |
+| 8 | **Add hardware abstraction layer** | Create a HAL header for `millis()`, `Serial`, GPIO for STM32 | ⚠️ Open |
+| 9 | **Increase test coverage** | Add tests for MotorController.processCommand() using existing mock infrastructure | ⚠️ Open |
 
 ### 🔵 P2 — Improve (Before Next Release)
 
-| # | Action | Details |
-|---|--------|---------|
-| 10 | **Add watchdog timer** | Prevent system freeze on motor lockup |
-| 11 | **Improve error polling** | Consider non-blocking error check during motion |
-| 12 | **Unify speed semantics** | Document DC motor "steps=ms" explicitly in interface |
-| 13 | **Add documentation index** | Master index linking all docs with brief descriptions |
-| 14 | **Fix hard-coded paths in scripts** | Use configuration files or environment variables |
-| 15 | **Resolve code duplication** | Merge FD/ and NoJS/ shared files into common location |
+| # | Action | Details | Status |
+|---|--------|---------|--------|
+| 10 | **Add watchdog timer** | Prevent system freeze on motor lockup | ⚠️ Open |
+| 11 | **Improve error polling** | Consider non-blocking error check during motion | ⚠️ Open (accepted tradeoff) |
+| 12 | **Unify speed semantics** | Document DC motor "steps=ms" explicitly in interface | ✅ Done (in command-protocol.md) |
+| 13 | **Add documentation index** | Master index linking all docs with brief descriptions | ⚠️ Open |
+| 14 | **Fix hard-coded paths in scripts** | Use configuration files or environment variables | ⚠️ Open |
+| 15 | **Resolve code duplication** | Merge FD/ and NoJS/ shared files into common location | ⚠️ Open |
 
 ---
 

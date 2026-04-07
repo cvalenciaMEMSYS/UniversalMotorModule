@@ -128,12 +128,12 @@ The RZ7899-MS supports PWM on both inputs for variable speed control:
 
 ```cpp
 // Forward at 50% speed
-ledcWrite(DC_FI_PIN, 128);  // 128/255 = ~50%
+ledcWrite(DC_FI_PIN, 512);  // 512/1023 = ~50%
 ledcWrite(DC_BI_PIN, 0);
 
 // Backward at 75% speed
 ledcWrite(DC_FI_PIN, 0);
-ledcWrite(DC_BI_PIN, 192);  // 192/255 = ~75%
+ledcWrite(DC_BI_PIN, 768);  // 768/1023 = ~75%
 
 // Coast stop
 ledcWrite(DC_FI_PIN, 0);
@@ -217,26 +217,31 @@ void dcMotorBrake() {
 
 | Command | Action | Example Output |
 |---------|--------|----------------|
-| `f` | Run forward at current speed | `DC Motor FORWARD at speed 128` |
-| `b` | Run backward at current speed | `DC Motor BACKWARD at speed 128` |
-| `o` | Stop motor (coast) | `DC Motor STOPPED (coast)` |
-| `p` | Set speed (0-1023) | `DC Motor speed set to: 800` |
+| `run forward` | Run forward at current speed | `DC Motor: Running forward` |
+| `run backward` | Run backward at current speed | `DC Motor: Running backward` |
+| `stop` | Stop motor (coast) | `DC Motor: Coast - freewheeling` |
+| `brake` | Active brake (motor locked) | `DC Motor: Brake - motor locked` |
+| `move <ms>` | Run for duration (milliseconds) | Forward: positive, Reverse: negative |
+| `abs <percent>` | Set speed as percentage (-100 to +100) | `DC Motor: Speed set to 80%` |
+| `set speed <val>` | Set max speed limit (0-100%) | `Max speed limited to 80%` |
 
 ### Example Session
 
 ```
-> f
-DC Motor FORWARD at speed 128
+> run forward
+DC Motor: Running forward
 
-> p
-Enter DC motor speed (0-1023): 800
-DC Motor speed set to: 800
+> set speed 80
+Max speed limited to 80%
 
-> b
-DC Motor BACKWARD at speed 800
+> abs 50
+DC Motor: Speed set to 50% (target: 0.40)
 
-> o
-DC Motor STOPPED (coast)
+> run backward
+DC Motor: Running backward
+
+> stop
+DC Motor: Coast (IN1=0, IN2=0) - freewheeling
 ```
 
 ---
@@ -287,8 +292,8 @@ DC Motor STOPPED (coast)
    - No shorts between pins?
 
 3. **Test with commands:**
-   - Press 'f' - does anything happen?
-   - Try 'p' and set speed to 255 (maximum)
+   - Send `run forward` — does the motor spin?
+   - Try `abs 100` to set full speed forward
 
 ### Motor Runs Wrong Direction
 

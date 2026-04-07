@@ -275,7 +275,7 @@ public:
 
 **Features:**
 - RZ7899 H-bridge control
-- PWM speed control (0-255)
+- PWM speed control (10-bit, 0-1023 duty cycle)
 - Forward/reverse/brake/coast
 - Enable/disable
 
