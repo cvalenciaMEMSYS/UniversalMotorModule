@@ -247,7 +247,7 @@ public:
 ### 7. TMC2209 Driver (`drivers/TMC2209Driver.h/.cpp`)
 
 **Features:**
-- UART communication (RX=GPIO 17, TX=GPIO 18)
+- UART communication (TX=GPIO 1, RX=GPIO 2)
 - Current control (0-2000mA)
 - Microstepping (1-256)
 - StealthChop (silent) / SpreadCycle (torque)

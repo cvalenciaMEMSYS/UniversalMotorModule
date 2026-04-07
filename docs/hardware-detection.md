@@ -18,7 +18,7 @@ The Universal Motor Module uses a simple GPIO-based detection circuit to automat
 | None (default)       | LOW     | LOW     | **TMC2209** (UART stepper) |
 | 10↔11 or 13↔11       | HIGH    | LOW     | **DC Motor** (RZ7899 H-bridge) |
 | 10↔12 or 13↔12       | LOW     | HIGH    | **TMC2208** (Step/Dir stepper) |
-| Both jumpered        | HIGH    | HIGH    | Reserved / Future |
+| Both jumpered        | HIGH    | HIGH    | **STSPIN220** (Step/Dir stepper) |
 
 ## How It Works
 
@@ -62,6 +62,19 @@ GPIO 12 ───┐
 GPIO 13 ───┘
 
 Result: GPIO 11=LOW, GPIO 12=HIGH → TMC2208 detected
+```
+
+### STSPIN220
+```
+GPIO 10 ───┐
+           ├─── Jumper wire
+GPIO 11 ───┘
+
+GPIO 12 ───┐
+           ├─── Jumper wire
+GPIO 13 ───┘
+
+Result: GPIO 11=HIGH, GPIO 12=HIGH → STSPIN220 detected
 ```
 
 ## Notes

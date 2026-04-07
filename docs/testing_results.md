@@ -93,12 +93,12 @@ set ihold 100  # Full run current for holding
 ### MCPWM Configuration Problems
 - Frequency calculation rounding errors at low speeds
 - Peripheral not optimally configured for dynamic speed changes
-- Check [MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp) frequency calculations
+- Check [FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp) frequency calculations
 
 ### Acceleration Profile Math Errors
 - Position overshoot indicates calculation bugs in acceleration/deceleration
-- Check [AccelerationProfile.h](../src/core/AccelerationProfile.h)
-- Check [MotionMath.h](../src/core/MotionMath.h)
+- Check [FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h)
+- Check [FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h)
 - Timing integration may accumulate errors
 
 ### Step Pulse Timing Violations
@@ -232,7 +232,7 @@ Further investigation with oscilloscope is recommended to identify root cause of
     - Prescaler value limiting max frequency
     - Incorrect clock source (APB_CLK vs other)
     - Period register reaching minimum value
-- **Code Location**: [MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp)
+- **Code Location**: [FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp)
 - **Recommendation**: 
   - Review MCPWM timer configuration
   - Check prescaler settings
@@ -268,7 +268,7 @@ Further investigation with oscilloscope is recommended to identify root cause of
   - Possible interrupt overflow or counter wraparound
   - Step counting logic not synchronized with actual MCPWM pulses
 - **Code Locations**: 
-  - [MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp) - pulse generation
+  - [FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp) - pulse generation
   - [MotorController.cpp](../src/core/MotorController.cpp) - position tracking
 - **Recommendation**:
   - Position counter MUST be synchronized with actual MCPWM pulses
@@ -350,9 +350,9 @@ Further investigation with oscilloscope is recommended to identify root cause of
 - Position tracking still increments (explains position errors)
 
 **Code Locations**:
-- [AccelerationProfile.h](../src/core/AccelerationProfile.h) - profile calculations
-- [MotionMath.h](../src/core/MotionMath.h) - velocity/position math
-- [MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp) - frequency updates
+- [FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h) - profile calculations
+- [FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h) - velocity/position math
+- [FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp) - frequency updates
 
 **Recommendation**:
 - Add oscilloscope trigger on STEP signal with persistence mode
@@ -421,9 +421,9 @@ These issues are blocking ALL reliable motion and must be resolved before any ot
 #### Task 1.1: Fix Pulse Gaps During Acceleration (Issue #11)
 **Priority**: CRITICAL  
 **Files to Modify**: 
-- [src/drivers/MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp)
-- [src/core/AccelerationProfile.h](../src/core/AccelerationProfile.h)
-- [src/core/MotionMath.h](../src/core/MotionMath.h)
+- [src/drivers/FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp)
+- [src/drivers/FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h)
+- [src/drivers/FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h)
 
 **Investigation Steps**:
 1. **Review MCPWM Timer Update Mechanism**
@@ -468,7 +468,7 @@ These issues are blocking ALL reliable motion and must be resolved before any ot
 #### Task 1.2: Remove 50kHz Frequency Cap (Issue #9)
 **Priority**: CRITICAL  
 **Files to Modify**: 
-- [src/drivers/MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp)
+- [src/drivers/FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp)
 
 **Investigation Steps**:
 1. **Review MCPWM Clock Configuration**
@@ -519,7 +519,7 @@ These issues are blocking ALL reliable motion and must be resolved before any ot
 #### Task 1.3: Fix Position Counter Synchronization (Issue #10)
 **Priority**: CRITICAL (Safety)  
 **Files to Modify**: 
-- [src/drivers/MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp)
+- [src/drivers/FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp)
 - [src/core/MotorController.cpp](../src/core/MotorController.cpp)
 
 **Investigation Steps**:
@@ -605,8 +605,8 @@ Once MCPWM core is stable and reliable, address motion quality issues.
 #### Task 2.1: Fix Low-Speed Timing Errors (Issue #2)
 **Priority**: HIGH  
 **Files to Modify**: 
-- [src/drivers/MCPWMStepper.cpp](../src/drivers/MCPWMStepper.cpp)
-- [src/core/MotionMath.h](../src/core/MotionMath.h)
+- [src/drivers/FastAccelStepperWrapper.cpp](../src/drivers/FastAccelStepperWrapper.cpp)
+- [src/drivers/FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h)
 
 **Investigation Steps**:
 1. **Analyze Frequency Calculation at Low Speeds**
@@ -657,8 +657,8 @@ Once MCPWM core is stable and reliable, address motion quality issues.
 #### Task 2.2: Fix Position Overshoot in Short Moves (Issue #3)
 **Priority**: HIGH  
 **Files to Modify**: 
-- [src/core/AccelerationProfile.h](../src/core/AccelerationProfile.h)
-- [src/core/MotionMath.h](../src/core/MotionMath.h)
+- [src/drivers/FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h)
+- [src/drivers/FastAccelStepperWrapper.h](../src/drivers/FastAccelStepperWrapper.h)
 
 **Investigation Steps**:
 1. **Test Triangular Profile Math**
@@ -999,4 +999,4 @@ Use this checklist to track overall progress:
 
 **Last Updated**: January 8, 2026  
 **Status**: Ready to begin Phase 1  
-**Next Action**: Start Task 1.1 - Investigate pulse gaps in MCPWMStepper.cpp
+**Next Action**: Start Task 1.1 - Investigate pulse gaps in FastAccelStepperWrapper.cpp

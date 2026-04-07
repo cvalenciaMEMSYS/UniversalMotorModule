@@ -142,7 +142,7 @@ ledcWrite(DC_BI_PIN, 0);
 
 **PWM Parameters Used:**
 - **Frequency:** 20 kHz (above audible range)
-- **Resolution:** 8-bit (0-255 duty cycle)
+- **Resolution:** 10-bit (0-1023 duty cycle)
 
 ---
 
@@ -165,8 +165,8 @@ void setup() {
     pinMode(DC_BI_PIN, OUTPUT);
     
     // Attach PWM (ESP32-S3 LEDC)
-    ledcAttach(DC_FI_PIN, 20000, 8);  // 20kHz, 8-bit resolution
-    ledcAttach(DC_BI_PIN, 20000, 8);
+    ledcAttach(DC_FI_PIN, 20000, 10);  // 20kHz, 10-bit resolution
+    ledcAttach(DC_BI_PIN, 20000, 10);
     
     // Start with motor stopped (coast)
     ledcWrite(DC_FI_PIN, 0);
@@ -180,10 +180,10 @@ void setup() {
 /**
  * Control DC motor direction and speed
  * @param forward true = forward, false = backward
- * @param speed PWM duty cycle (0-255)
+ * @param speed PWM duty cycle (0-1023)
  */
 void dcMotorControl(bool forward, int speed) {
-    speed = constrain(speed, 0, 255);
+    speed = constrain(speed, 0, 1023);
     
     if (forward) {
         ledcWrite(DC_BI_PIN, 0);
@@ -206,8 +206,8 @@ void dcMotorStop() {
  * Brake DC motor (active stop)
  */
 void dcMotorBrake() {
-    ledcWrite(DC_FI_PIN, 255);
-    ledcWrite(DC_BI_PIN, 255);
+    ledcWrite(DC_FI_PIN, 1023);
+    ledcWrite(DC_BI_PIN, 1023);
 }
 ```
 
@@ -220,7 +220,7 @@ void dcMotorBrake() {
 | `f` | Run forward at current speed | `DC Motor FORWARD at speed 128` |
 | `b` | Run backward at current speed | `DC Motor BACKWARD at speed 128` |
 | `o` | Stop motor (coast) | `DC Motor STOPPED (coast)` |
-| `p` | Set speed (0-255) | `DC Motor speed set to: 200` |
+| `p` | Set speed (0-1023) | `DC Motor speed set to: 800` |
 
 ### Example Session
 
@@ -229,11 +229,11 @@ void dcMotorBrake() {
 DC Motor FORWARD at speed 128
 
 > p
-Enter DC motor speed (0-255): 200
-DC Motor speed set to: 200
+Enter DC motor speed (0-1023): 800
+DC Motor speed set to: 800
 
 > b
-DC Motor BACKWARD at speed 200
+DC Motor BACKWARD at speed 800
 
 > o
 DC Motor STOPPED (coast)
@@ -266,7 +266,7 @@ DC Motor STOPPED (coast)
 | 10-bit | 1024 | High precision |
 | 12-bit | 4096 | Very fine control |
 
-**8-bit is used** for simplicity (0-255 is intuitive).
+**10-bit is used** to provide fine-grained speed control (0-1023 range).
 
 ---
 
