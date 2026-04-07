@@ -128,12 +128,12 @@ The RZ7899-MS supports PWM on both inputs for variable speed control:
 
 ```cpp
 // Forward at 50% speed
-ledcWrite(DC_FI_PIN, 128);  // 128/255 = ~50%
+ledcWrite(DC_FI_PIN, 512);  // 512/1023 = ~50%
 ledcWrite(DC_BI_PIN, 0);
 
 // Backward at 75% speed
 ledcWrite(DC_FI_PIN, 0);
-ledcWrite(DC_BI_PIN, 192);  // 192/255 = ~75%
+ledcWrite(DC_BI_PIN, 768);  // 768/1023 = ~75%
 
 // Coast stop
 ledcWrite(DC_FI_PIN, 0);
@@ -142,7 +142,7 @@ ledcWrite(DC_BI_PIN, 0);
 
 **PWM Parameters Used:**
 - **Frequency:** 20 kHz (above audible range)
-- **Resolution:** 8-bit (0-255 duty cycle)
+- **Resolution:** 10-bit (0-1023 duty cycle)
 
 ---
 
@@ -165,8 +165,8 @@ void setup() {
     pinMode(DC_BI_PIN, OUTPUT);
     
     // Attach PWM (ESP32-S3 LEDC)
-    ledcAttach(DC_FI_PIN, 20000, 8);  // 20kHz, 8-bit resolution
-    ledcAttach(DC_BI_PIN, 20000, 8);
+    ledcAttach(DC_FI_PIN, 20000, 10);  // 20kHz, 10-bit resolution
+    ledcAttach(DC_BI_PIN, 20000, 10);
     
     // Start with motor stopped (coast)
     ledcWrite(DC_FI_PIN, 0);
@@ -180,10 +180,10 @@ void setup() {
 /**
  * Control DC motor direction and speed
  * @param forward true = forward, false = backward
- * @param speed PWM duty cycle (0-255)
+ * @param speed PWM duty cycle (0-1023)
  */
 void dcMotorControl(bool forward, int speed) {
-    speed = constrain(speed, 0, 255);
+    speed = constrain(speed, 0, 1023);
     
     if (forward) {
         ledcWrite(DC_BI_PIN, 0);
@@ -206,8 +206,8 @@ void dcMotorStop() {
  * Brake DC motor (active stop)
  */
 void dcMotorBrake() {
-    ledcWrite(DC_FI_PIN, 255);
-    ledcWrite(DC_BI_PIN, 255);
+    ledcWrite(DC_FI_PIN, 1023);
+    ledcWrite(DC_BI_PIN, 1023);
 }
 ```
 
@@ -217,26 +217,31 @@ void dcMotorBrake() {
 
 | Command | Action | Example Output |
 |---------|--------|----------------|
-| `f` | Run forward at current speed | `DC Motor FORWARD at speed 128` |
-| `b` | Run backward at current speed | `DC Motor BACKWARD at speed 128` |
-| `o` | Stop motor (coast) | `DC Motor STOPPED (coast)` |
-| `p` | Set speed (0-255) | `DC Motor speed set to: 200` |
+| `run forward` | Run forward at current speed | `DC Motor: Running forward` |
+| `run backward` | Run backward at current speed | `DC Motor: Running backward` |
+| `stop` | Stop motor (coast) | `DC Motor: Coast - freewheeling` |
+| `brake` | Active brake (motor locked) | `DC Motor: Brake - motor locked` |
+| `move <ms>` | Run for duration (milliseconds) | Forward: positive, Reverse: negative |
+| `abs <percent>` | Set speed as percentage (-100 to +100) | `DC Motor: Speed set to 80%` |
+| `set speed <val>` | Set max speed limit (0-100%) | `Max speed limited to 80%` |
 
 ### Example Session
 
 ```
-> f
-DC Motor FORWARD at speed 128
+> run forward
+DC Motor: Running forward
 
-> p
-Enter DC motor speed (0-255): 200
-DC Motor speed set to: 200
+> set speed 80
+Max speed limited to 80%
 
-> b
-DC Motor BACKWARD at speed 200
+> abs 50
+DC Motor: Speed set to 50% (target: 0.40)
 
-> o
-DC Motor STOPPED (coast)
+> run backward
+DC Motor: Running backward
+
+> stop
+DC Motor: Coast (IN1=0, IN2=0) - freewheeling
 ```
 
 ---
@@ -266,7 +271,7 @@ DC Motor STOPPED (coast)
 | 10-bit | 1024 | High precision |
 | 12-bit | 4096 | Very fine control |
 
-**8-bit is used** for simplicity (0-255 is intuitive).
+**10-bit is used** to provide fine-grained speed control (0-1023 range).
 
 ---
 
@@ -287,8 +292,8 @@ DC Motor STOPPED (coast)
    - No shorts between pins?
 
 3. **Test with commands:**
-   - Press 'f' - does anything happen?
-   - Try 'p' and set speed to 255 (maximum)
+   - Send `run forward` — does the motor spin?
+   - Try `abs 100` to set full speed forward
 
 ### Motor Runs Wrong Direction
 

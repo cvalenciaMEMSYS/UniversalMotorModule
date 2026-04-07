@@ -247,7 +247,7 @@ public:
 ### 7. TMC2209 Driver (`drivers/TMC2209Driver.h/.cpp`)
 
 **Features:**
-- UART communication (RX=GPIO 17, TX=GPIO 18)
+- UART communication (TX=GPIO 1, RX=GPIO 2)
 - Current control (0-2000mA)
 - Microstepping (1-256)
 - StealthChop (silent) / SpreadCycle (torque)
@@ -275,7 +275,7 @@ public:
 
 **Features:**
 - RZ7899 H-bridge control
-- PWM speed control (0-255)
+- PWM speed control (10-bit, 0-1023 duty cycle)
 - Forward/reverse/brake/coast
 - Enable/disable
 

@@ -45,6 +45,7 @@ MotorController controller;
 // Input buffer for serial commands
 String inputBuffer = "";
 bool inputComplete = false;
+constexpr uint16_t MAX_INPUT_LENGTH = 128;  // Max command length in characters
 uint32_t lastCharTime = 0;  // For timeout-based command detection
 uint32_t lastSerialActivity = 0;  // Track actual serial data reception
 
@@ -123,9 +124,11 @@ void loop() {
                 inputComplete = true;
             }
         } else if (c >= 32 && c < 127) {
-            // Only add printable ASCII characters
-            inputBuffer += c;
-            lastCharTime = millis();  // Track when last char was received
+            // Only add printable ASCII characters (up to max length)
+            if (inputBuffer.length() < MAX_INPUT_LENGTH) {
+                inputBuffer += c;
+                lastCharTime = millis();  // Track when last char was received
+            }
         }
     }
     

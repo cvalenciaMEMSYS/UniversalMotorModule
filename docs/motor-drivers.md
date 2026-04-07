@@ -69,7 +69,7 @@ move 1000          # Move 1000 steps forward
 abs 5000           # Move to absolute position 5000
 set speed 2000     # Set max speed to 2000 steps/sec
 set accel 500      # Enable trapezoidal acceleration
-set jerk 5000      # Enable S-curve acceleration
+set cubesteps 400  # Enable S-curve acceleration (0 = trapezoidal)
 set current 600    # Set run current to 600mA
 home               # StallGuard sensorless homing
 status             # Show full diagnostics
@@ -133,7 +133,7 @@ move 1000          # Move 1000 steps forward
 abs 5000           # Move to absolute position 5000
 set speed 2000     # Set max speed to 2000 steps/sec
 set accel 500      # Enable trapezoidal acceleration
-set jerk 5000      # Enable S-curve acceleration
+set cubesteps 400  # Enable S-curve acceleration (0 = trapezoidal)
 set current 600    # Set run current to 600mA (via UART)
 stepdir on         # Switch to Step/Dir fallback mode
 status             # Show diagnostics
@@ -154,8 +154,8 @@ Controls DC motors via an H-bridge (like RZ7899). Uses PWM for speed control.
 ### Wiring
 
 ```
-GPIO 7  →  H-bridge IN1 (PWM capable)
-GPIO 8  →  H-bridge IN2 (PWM capable)
+GPIO 8  →  H-bridge IN1 (PWM capable)
+GPIO 9  →  H-bridge IN2 (PWM capable)
 
 For RZ7899 or similar:
   VCC  →  Motor supply voltage (6-12V typical)
@@ -214,7 +214,7 @@ GPIO 12 ── Detect Bit 1 (pull-down input)
 | LOW | LOW | TMC2209 (default) |
 | HIGH | LOW | DC Motor |
 | LOW | HIGH | TMC2208 |
-| HIGH | HIGH | Reserved |
+| HIGH | HIGH | STSPIN220 (Step/Dir stepper) |
 
 To select a driver, connect jumper wires from VCC pins to the appropriate detect pins.
 
@@ -236,19 +236,14 @@ set accel 500      # Steps/sec² acceleration
 ```
 Linear acceleration and deceleration ramps. Smooth but not optimal.
 
-### S-Curve (7-Segment)
+### S-Curve (Cubic)
 ```
 set accel 500      # Steps/sec² max acceleration
-set jerk 5000      # Steps/sec³ jerk limit
+set cubesteps 400  # Ramp steps for S-curve (0 = trapezoidal)
 ```
-Jerk-limited motion for the smoothest operation:
-1. Jerk+ (acceleration increases)
-2. Constant acceleration
-3. Jerk- (acceleration decreases to 0)
-4. Cruise (constant velocity)
-5. Jerk- (acceleration goes negative)
-6. Constant deceleration
-7. Jerk+ (acceleration returns to 0)
+S-curve motion using FastAccelStepper's cubic acceleration ramp. The `cubesteps`
+parameter controls how many steps are used for the acceleration/deceleration
+transition, producing smoother jerk-limited motion compared to a linear ramp.
 
 ---
 
