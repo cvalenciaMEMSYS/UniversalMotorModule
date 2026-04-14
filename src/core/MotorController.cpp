@@ -9,6 +9,7 @@
 #include "StatusLED.h"
 #include "../drivers/TMC2209Driver.h"
 #include "../drivers/TMC2208Driver.h"
+#include "../drivers/HarCoHBridgeDriver.h"
 #include <FastAccelStepper.h>  // For RAMP_STATE_* constants
 
 // =============================================================================
@@ -419,6 +420,42 @@ void MotorController::processCommand(const String& cmd) {
             Serial.println("PWM autoscale only applies to TMC drivers");
         }
     }
+    else if (command == "sleep on" || command == "wake") {
+        // Wake up HarCo module (nSLEEP = HIGH)
+        if (_driver->getType() == MotorType::HARCO_HBRIDGE) {
+            auto* harco = static_cast<HarCoHBridgeDriver*>(_driver);
+            harco->setSleep(true);
+        } else {
+            Serial.println("sleep/wake commands only apply to HarCo H-Bridge driver");
+        }
+    }
+    else if (command == "sleep off" || command == "sleep") {
+        // Put HarCo module to sleep (nSLEEP = LOW)
+        if (_driver->getType() == MotorType::HARCO_HBRIDGE) {
+            auto* harco = static_cast<HarCoHBridgeDriver*>(_driver);
+            harco->setSleep(false);
+        } else {
+            Serial.println("sleep/wake commands only apply to HarCo H-Bridge driver");
+        }
+    }
+    else if (command == "invert sleep") {
+        // Toggle nSLEEP logic inversion
+        if (_driver->getType() == MotorType::HARCO_HBRIDGE) {
+            auto* harco = static_cast<HarCoHBridgeDriver*>(_driver);
+            harco->invertSleepLogic(!harco->isSleepInverted());
+        } else {
+            Serial.println("invert commands only apply to HarCo H-Bridge driver");
+        }
+    }
+    else if (command == "invert enable") {
+        // Toggle Enable logic inversion
+        if (_driver->getType() == MotorType::HARCO_HBRIDGE) {
+            auto* harco = static_cast<HarCoHBridgeDriver*>(_driver);
+            harco->invertEnableLogic(!harco->isEnableInverted());
+        } else {
+            Serial.println("invert commands only apply to HarCo H-Bridge driver");
+        }
+    }
     
     // === UNKNOWN ===
     
@@ -589,6 +626,12 @@ void MotorController::printHelp() {
     Serial.println("│    stealthchop       Silent mode                            │");
     Serial.println("│    spreadcycle       High-torque mode                       │");
     Serial.println("│    pwmautoscale on/off  Auto current reduction              │");
+    Serial.println("│                                                             │");
+    Serial.println("│  HarCo H-Bridge (DRV88xx):                                 │");
+    Serial.println("│    sleep on / wake   Wake module (nSLEEP=HIGH)             │");
+    Serial.println("│    sleep off / sleep Put module to sleep (nSLEEP=LOW)      │");
+    Serial.println("│    invert sleep      Toggle nSLEEP logic inversion         │");
+    Serial.println("│    invert enable     Toggle Enable logic inversion         │");
     Serial.println("│                                                             │");
     Serial.println("│  Status/Debug:                                              │");
     Serial.println("│    ? or status       Show current status                    │");

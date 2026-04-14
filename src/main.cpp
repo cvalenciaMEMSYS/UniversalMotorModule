@@ -10,15 +10,18 @@
  *   - TMC2209: UART-controlled stepper with StealthChop and StallGuard
  *   - TMC2208: Step/Dir stepper (standalone mode)
  *   - DC Motor: RZ7899 H-bridge with PWM speed control
+ *   - STSPIN220: Simple Step/Dir stepper (no comms)
+ *   - HarCo H-Bridge: Custom DRV88xx modules (DRV8837/8832/8210P/8839)
  * 
  * Hardware Detection:
  *   GPIO 10, 13 = VCC source (output HIGH)
  *   GPIO 11, 12 = Detection inputs (internal pull-down)
  *   
  *   Jumper Configuration:
- *     No jumper        → TMC2209 (default)
+ *     No jumper        → STSPIN220 (default)
  *     11 to VCC        → DC Motor
- *     12 to VCC        → TMC2208
+ *     12 to VCC        → HarCo H-Bridge
+ *     Both to VCC      → TMC2209
  * 
  * Serial Commands (115200 baud):
  *   move <steps>       - Relative move

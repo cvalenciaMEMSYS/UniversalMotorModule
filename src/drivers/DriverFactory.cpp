@@ -12,6 +12,7 @@
 #include "TMC2208Driver.h"
 #include "DCMotorDriver.h"
 #include "STSPIN220Driver.h"
+#include "HarCoHBridgeDriver.h"
 
 // Static member initialization
 bool DriverFactory::_detectionInitialized = false;
@@ -42,17 +43,21 @@ MotorType DriverFactory::detectHardware() {
     bool bit1 = digitalRead(DETECT_BIT_1);  // TMC2208 flag
     
     // Decode detection bits
+    //   !bit0 && !bit1 → STSPIN220 (default, no jumpers)
+    //   bit0  && !bit1 → DC Motor (RZ7899)
+    //   !bit0 && bit1  → HarCo H-Bridge (DRV88xx)
+    //   bit0  && bit1  → TMC2209
     if (!bit0 && !bit1) {
-        return MotorType::STEPPER_TMC2209;  // Default: nothing connected
+        return MotorType::STEPPER_STSPIN220;  // Default: nothing connected
     }
     else if (bit0 && !bit1) {
         return MotorType::DC_MOTOR;
     }
     else if (!bit0 && bit1) {
-        return MotorType::STEPPER_TMC2208;
+        return MotorType::HARCO_HBRIDGE;
     }
     else {
-        return MotorType::STEPPER_STSPIN220;  // Both HIGH = STSPIN220
+        return MotorType::STEPPER_TMC2209;  // Both HIGH = TMC2209
     }
 }
 
@@ -69,6 +74,9 @@ IMotorDriver* DriverFactory::createDriver(MotorType type) {
             
         case MotorType::STEPPER_STSPIN220:
             return new STSPIN220Driver();
+            
+        case MotorType::HARCO_HBRIDGE:
+            return new HarCoHBridgeDriver();
             
         case MotorType::UNKNOWN:
         default:
@@ -122,12 +130,12 @@ void DriverFactory::printDetectionInfo() {
     Serial.print("Detect Bit 0 (GPIO ");
     Serial.print(DETECT_BIT_0);
     Serial.print("): ");
-    Serial.println(digitalRead(DETECT_BIT_0) ? "HIGH → DC Motor" : "LOW");
+    Serial.println(digitalRead(DETECT_BIT_0) ? "HIGH → DC Motor (or TMC2209 if both HIGH)" : "LOW");
     
     Serial.print("Detect Bit 1 (GPIO ");
     Serial.print(DETECT_BIT_1);
     Serial.print("): ");
-    Serial.println(digitalRead(DETECT_BIT_1) ? "HIGH → TMC2208 (or STSPIN220 if both HIGH)" : "LOW");
+    Serial.println(digitalRead(DETECT_BIT_1) ? "HIGH → HarCo H-Bridge (or TMC2209 if both HIGH)" : "LOW");
     
     Serial.print("\nDetected Type: ");
     Serial.println(motorTypeToString(detectHardware()));

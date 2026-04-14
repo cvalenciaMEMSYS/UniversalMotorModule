@@ -19,6 +19,7 @@ class TMC2209Driver;
 class TMC2208Driver;
 class DCMotorDriver;
 class STSPIN220Driver;
+class HarCoHBridgeDriver;
 
 /**
  * @brief Factory class for creating motor drivers at runtime
@@ -30,9 +31,9 @@ class STSPIN220Driver;
  * Detection is based on GPIO pins configured as inputs with pull-downs:
  *   - GPIO 10 & 13: Output HIGH (VCC source for jumpers)
  *   - GPIO 11: If HIGH → DC Motor
- *   - GPIO 12: If HIGH → TMC2208
- *   - Both HIGH → STSPIN220
- *   - Both LOW → TMC2209 (default)
+ *   - GPIO 12: If HIGH → TMC2209 (with both)
+ *   - Both LOW → STSPIN220 (default)
+ *   - Only 12 → HarCo H-Bridge
  */
 class DriverFactory {
 public:

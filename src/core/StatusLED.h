@@ -70,7 +70,8 @@ enum class DriverType {
     TMC2209,
     TMC2208,
     DC_MOTOR,
-    STSPIN220
+    STSPIN220,
+    HARCO
 };
 
 /**
@@ -117,6 +118,7 @@ inline DriverType motorTypeToDriverType(MotorType type) {
         case 1: return DriverType::TMC2208;    // STEPPER_TMC2208
         case 2: return DriverType::DC_MOTOR;   // DC_MOTOR
         case 3: return DriverType::STSPIN220;  // STEPPER_STSPIN220
+        case 4: return DriverType::HARCO;      // HARCO_HBRIDGE
         default: return DriverType::UNKNOWN;
     }
 }

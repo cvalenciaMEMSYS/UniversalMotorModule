@@ -23,10 +23,10 @@
 // Detection Truth Table:
 //   GPIO 11 | GPIO 12 | Driver
 //   --------|---------|------------------
-//   LOW     | LOW     | TMC2209 (default)
+//   LOW     | LOW     | STSPIN220 (default, no jumper)
 //   HIGH    | LOW     | DC Motor (RZ7899)
-//   LOW     | HIGH    | TMC2208
-//   HIGH    | HIGH    | STSPIN220
+//   LOW     | HIGH    | HarCo H-Bridge (DRV88xx)
+//   HIGH    | HIGH    | TMC2209
 
 constexpr uint8_t DETECT_VCC_1    = 10;   // Output HIGH (VCC source)
 constexpr uint8_t DETECT_VCC_2    = 13;   // Output HIGH (VCC source)
@@ -67,6 +67,29 @@ constexpr uint8_t DC_IN2_PIN      = 9;    // H-bridge input 2 (PWM capable)
 constexpr uint8_t DC_PWM_CHANNEL  = 0;    // ESP32 LEDC channel for PWM
 constexpr uint32_t DC_PWM_FREQ    = 20000; // 20kHz PWM frequency (ultrasonic)
 constexpr uint8_t DC_PWM_RES      = 10;   // 10-bit resolution (0-1023)
+
+// =============================================================================
+// HARCO H-BRIDGE MODULE PINS (DRV88xx series on stepper socket)
+// =============================================================================
+// Custom H-bridge modules plugged into the stepper driver socket.
+// Tested at Vm = Vcc = 3.3V.
+//
+// Supported modules:
+//   DRV8837  (black)  — IN1, IN2, nSLEEP
+//   DRV8832  (green)  — IN1, IN2, nSLEEP
+//   DRV8210P (blue)   — IN1, IN2, nSLEEP
+//   DRV8839  (white)  — IN1, IN2, nSLEEP, Enable
+//
+// Control modes (same as onboard DC motor):
+//   IN1=HIGH, IN2=LOW  → Forward
+//   IN1=LOW,  IN2=HIGH → Reverse
+//   IN1=LOW,  IN2=LOW  → Coast (motor free)
+//   IN1=HIGH, IN2=HIGH → Brake (motor locked)
+
+constexpr uint8_t HARCO_IN1_PIN    = 5;    // STEP pin → H-bridge IN1 (PWM capable)
+constexpr uint8_t HARCO_IN2_PIN    = 6;    // DIR pin  → H-bridge IN2 (PWM capable)
+constexpr uint8_t HARCO_EN_PIN     = 4;    // EN pin   → H-bridge Enable (active LOW, DRV8839 only)
+constexpr uint8_t HARCO_SLEEP_PIN  = 3;    // CLK pin  → H-bridge nSLEEP (active HIGH, all modules)
 
 // =============================================================================
 // STATUS LED (WS2812 NeoPixel on ESP32-S3 Super Mini)
