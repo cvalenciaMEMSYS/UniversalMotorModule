@@ -21,13 +21,6 @@
 //   DRV8832  (green) — IN1/IN2 only
 //   DRV8210P (blue)  — IN1/IN2 only
 //   DRV8839  (white) — IN1/IN2 + Enable pin
-//
-// Uncomment ONE module below to match your hardware:
-
-// #define MODULE_DRV8837
-// #define MODULE_DRV8832
-// #define MODULE_DRV8210P
-#define MODULE_DRV8839
 
 // =============================================================================
 // PIN CONFIGURATION (Nucleo-L031K6, Arduino Nano pinout)
@@ -48,22 +41,6 @@ static const int      PIN_EN    = D4;    // PB7
 // TIM2 channel numbers for PB0 and PB1
 static const uint32_t CH_IN1 = 3;  // TIM2_CH3
 static const uint32_t CH_IN2 = 4;  // TIM2_CH4
-
-#if defined(MODULE_DRV8839)
-static const bool HAS_EN = true;
-static const char MODULE_NAME[] = "DRV8839";
-#elif defined(MODULE_DRV8837)
-static const bool HAS_EN = false;
-static const char MODULE_NAME[] = "DRV8837";
-#elif defined(MODULE_DRV8832)
-static const bool HAS_EN = false;
-static const char MODULE_NAME[] = "DRV8832";
-#elif defined(MODULE_DRV8210P)
-static const bool HAS_EN = false;
-static const char MODULE_NAME[] = "DRV8210P";
-#else
-#error "No module defined. Uncomment one MODULE_DRVxxxx at the top."
-#endif
 
 // PWM: 20kHz via HardwareTimer (TIM2)
 static const uint32_t PWM_FREQ = 20000;
@@ -178,7 +155,6 @@ static void setSleep(bool doWake) {
 }
 
 static void setEnable(bool doEnable) {
-    if (!HAS_EN) return;
     enabled = doEnable;
     digitalWrite(PIN_EN, doEnable ? LOW : HIGH);  // Active-LOW
 }
@@ -308,19 +284,11 @@ void setup() {
     pinMode(PIN_SLEEP, OUTPUT);
     setSleep(true);
 
-    // Enable pin (DRV8839 only)
-    if (HAS_EN) {
-        pinMode(PIN_EN, OUTPUT);
-        setEnable(true);
-    }
-
     // 20kHz PWM on TIM2 channels
     initPWM();
 
     Serial.println();
-    Serial.print("STM32 UMM [");
-    Serial.print(MODULE_NAME);
-    Serial.println("]");
+    Serial.println("STM32 UMM HarCo Motor Controller");
     Serial.println("Type 'help' for commands");
 }
 
