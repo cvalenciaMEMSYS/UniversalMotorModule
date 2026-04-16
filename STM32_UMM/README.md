@@ -47,7 +47,7 @@ Commands match the main UMM implementation. Timed moves print `Complete` when fi
 | Command | Action |
 |---------|--------|
 | `move <ms>` | Timed move at 100% speed (positive=fwd, negative=rev) |
-| `abs <ms> <speed%>` | Timed move at specified speed (0-100%), sign = direction |
+| `abs <ms> <speed%>` | Timed move at specified speed (0-100%), sign = direction. naming is not consistent with main UMM but DC motors don't have absolute positioning, I expect this command to not be really used |
 | `run f` | Forward at max speed indefinitely |
 | `run b` | Reverse at max speed indefinitely |
 | `stop` | Emergency stop (coast) |
