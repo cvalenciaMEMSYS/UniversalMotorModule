@@ -1,5 +1,10 @@
 # Universal Motor Module
 
+> **⚠️ DEPRECATED** — This repository has been archived. Development continues in the consolidated monorepo:
+> **[MEMSYS-bv/MEMSYS-lab-mcu-nodes](https://github.com/MEMSYS-bv/MEMSYS-lab-mcu-nodes)** → `nodes/universal-motor-module/`
+>
+> This repo is kept for reference only. Please open issues and submit PRs in the new repo.
+
 Full-featured motor control system supporting TMC2209/TMC2208 stepper drivers, STSPIN220 simple stepper drivers, and RZ7899-MS H-bridge DC motor controllers, built with PlatformIO for ESP32-S3 Super Mini. Automatically detects connected hardware via jumper pins.
 
 **Features:**
