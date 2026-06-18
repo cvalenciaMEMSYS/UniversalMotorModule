@@ -9,9 +9,9 @@ import time
 import serial
 
 COM_PORT = "COM5"
-TRAVEL =60_000
-CYCLES = 50
-MOVE_TIME_S = 80
+TRAVEL =97_000
+CYCLES = 100
+MOVE_TIME_S =97
 
 
 def main() -> None:
